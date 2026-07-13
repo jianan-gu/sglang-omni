@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from sglang_omni.utils.device import current_accelerator_type
+
+logger = logging.getLogger(__name__)
 
 
 def create_sglang_infrastructure(
@@ -113,6 +118,19 @@ def create_sglang_infrastructure_defer_cuda_graph(
     init_device_graphs() only when this returns that CUDA graphs were requested.
     """
     want_cuda_graph = not bool(server_args.disable_cuda_graph)
+    if want_cuda_graph and current_accelerator_type() != "cuda":
+        # sglang's device-graph capture (torch.cuda.CUDAGraph) is CUDA-only in
+        # the pinned sglang version this repo depends on; requesting it on any
+        # other accelerator crashes with "Tried to instantiate dummy base class
+        # CUDAGraph" deep inside sglang's cuda_graph_runner. Fall back to eager
+        # decode instead of capturing.
+        logger.info(
+            "Disabling CUDA graph capture: no CUDA accelerator detected "
+            "(device=%s)",
+            current_accelerator_type(),
+        )
+        want_cuda_graph = False
+        server_args.disable_cuda_graph = True
     if want_cuda_graph:
         server_args.disable_cuda_graph = True
     try:

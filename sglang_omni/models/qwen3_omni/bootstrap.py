@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from sglang_omni.utils.device import current_accelerator_type
+
+logger = logging.getLogger(__name__)
 
 
 def create_thinker_scheduler(
@@ -33,6 +38,17 @@ def create_thinker_scheduler(
     capture_hidden_layers = [0, 24] if speech_enabled else None
     capture_hidden = speech_enabled
     want_cuda_graph = not bool(server_args.disable_cuda_graph)
+    if want_cuda_graph and current_accelerator_type() != "cuda":
+        # Device-graph capture (torch.cuda.CUDAGraph) is CUDA-only in the
+        # pinned sglang version this repo depends on; requesting it on any
+        # other accelerator crashes deep inside sglang's cuda_graph_runner.
+        logger.info(
+            "Disabling CUDA graph capture for thinker: no CUDA accelerator "
+            "detected (device=%s)",
+            current_accelerator_type(),
+        )
+        want_cuda_graph = False
+        server_args.disable_cuda_graph = True
     defer_cuda_graph_capture = want_cuda_graph and capture_hidden
     if defer_cuda_graph_capture:
         server_args.enable_return_hidden_states = True
