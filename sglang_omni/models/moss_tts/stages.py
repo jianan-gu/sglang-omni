@@ -30,6 +30,7 @@ from sglang_omni.scheduling.pipeline_state import store_state as _store_pipeline
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.vocoder_base import BatchVocoderBase
 from sglang_omni.utils.audio_payload import audio_waveform_payload
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -218,14 +219,17 @@ class _MossTTSVocoder(BatchVocoderBase):
 def create_vocoder_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "float32",
     max_batch_size: int = 8,
     max_batch_wait_ms: int = 2,
 ) -> SimpleScheduler:
+    accel_type = current_accelerator_type()
     if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
+        device = str(resolve_device(gpu_id, accel_type))
+    elif device is None:
+        device = str(resolve_device(0, accel_type))
     processor = _load_moss_processor(model_path, device=device, dtype=dtype)
 
     return _MossTTSVocoder(processor, device).build_scheduler(

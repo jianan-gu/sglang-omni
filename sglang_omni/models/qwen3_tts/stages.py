@@ -25,6 +25,7 @@ from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.vocoder_base import BatchVocoderBase
 from sglang_omni.utils.audio_payload import audio_waveform_payload
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ def create_preprocessing_executor(model_path: str) -> SimpleScheduler:
 def create_sglang_tts_engine_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     attn_implementation: str | None = None,
@@ -227,15 +228,18 @@ class _Qwen3TTSVocoder(BatchVocoderBase):
 def create_vocoder_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     attn_implementation: str | None = None,
     max_batch_size: int = 8,
     max_batch_wait_ms: int = 2,
 ) -> SimpleScheduler:
+    accel_type = current_accelerator_type()
     if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
+        device = str(resolve_device(gpu_id, accel_type))
+    elif device is None:
+        device = str(resolve_device(0, accel_type))
     tokenizer = _load_qwen3_tts_tokenizer(
         model_path,
         device=device,

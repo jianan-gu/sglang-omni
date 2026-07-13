@@ -26,6 +26,7 @@ from sglang_omni.profiler.event_recorder import emit as _emit_event
 from sglang_omni.profiler.event_recorder import get_recorder as _get_recorder
 from sglang_omni.profiler.event_recorder import set_active_stage as _set_active_stage
 from sglang_omni.profiler.torch_profiler import TorchProfiler
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 from sglang_omni.proto import (
     AdminMessage,
     AdminResult,
@@ -115,12 +116,13 @@ class Stage:
             engine_id = config.get("worker_id", f"{name}_relay")
             relay_type = config.get("relay_type", "nixl").lower()
             gpu_id = config.get("gpu_id")
+            accel_type = current_accelerator_type()
             if gpu_id is not None:
-                device = f"cuda:{gpu_id}"
+                device = str(resolve_device(gpu_id, accel_type))
             else:
                 device = "cpu"
                 if relay_type == "nccl":
-                    device = "cuda"
+                    device = accel_type
             self.relay = create_relay(
                 relay_type,
                 engine_id=engine_id,

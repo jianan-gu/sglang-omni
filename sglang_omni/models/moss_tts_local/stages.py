@@ -46,6 +46,7 @@ from sglang_omni.scheduling.reference_encoder import (
     ReferenceEncodeService,
 )
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +157,10 @@ def _resolve_codec_device(device: str | None, gpu_id: int | None) -> str:
     """
     if device:
         return device
+    accel_type = current_accelerator_type()
     if gpu_id is not None:
-        return f"cuda:{int(gpu_id)}"
-    return "cuda:0"
+        return str(resolve_device(int(gpu_id), accel_type))
+    return str(resolve_device(0, accel_type))
 
 
 def _load_moss_tts_local_processor(model_path: str) -> Any:

@@ -18,6 +18,7 @@ from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.streaming_simple_scheduler import StreamingSimpleScheduler
 from sglang_omni.utils.audio_payload import audio_waveform_payload
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -271,15 +272,18 @@ class Code2WavScheduler(StreamingSimpleScheduler):
 def create_code2wav_scheduler(
     model_path: str,
     *,
-    device: str = "cuda",
+    device: str | None = None,
     dtype: str | None = None,
     gpu_id: int | None = None,
     stream_chunk_size: int = 10,
     left_context_size: int = 25,
 ):
     """Factory: returns Code2WavScheduler."""
+    accel_type = current_accelerator_type()
     if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
+        device = str(resolve_device(gpu_id, accel_type))
+    elif device is None:
+        device = str(resolve_device(0, accel_type))
     model = load_code2wav_model(model_path, device=device, dtype=dtype)
     return Code2WavScheduler(
         model,
