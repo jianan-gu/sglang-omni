@@ -22,6 +22,13 @@ from sglang_omni.pipeline.stage.input import AggregatedInput, DirectInput
 from sglang_omni.pipeline.stage.runtime import Stage
 from sglang_omni.pipeline.stage.stream_queue import StreamQueue
 from sglang_omni.pipeline.tp_control import TPFollowerControlPlane, TPLeaderFanout
+from sglang_omni.utils.device import (
+    current_accelerator_type,
+    get_device_module,
+    resolve_device,
+    set_device,
+    synchronize,
+)
 from sglang_omni.utils.gpu_compat import (
     apply_gpu_compat_env_defaults,
     get_gpu_compat_env_defaults,
@@ -526,26 +533,32 @@ def _reclaim_process_cuda_memory(
         return
     gc.collect()
     try:
-        import torch
-
-        if not torch.cuda.is_available():
+        accel_type = current_accelerator_type()
+        if accel_type == "cpu":
+            return
+        module = get_device_module(accel_type)
+        if module is None:
             return
         log.warning(
-            "Reclaiming CUDA memory after %s on gpu_ids=%s",
+            "Reclaiming %s memory after %s on gpu_ids=%s",
+            accel_type,
             reason,
             gpu_id_list,
         )
         for gpu_id in gpu_id_list:
             try:
-                torch.cuda.set_device(int(gpu_id))
+                set_device(resolve_device(int(gpu_id), accel_type))
                 with suppress(Exception):
-                    torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                with suppress(Exception):
-                    torch.cuda.ipc_collect()
+                    synchronize()
+                if hasattr(module, "empty_cache"):
+                    module.empty_cache()
+                if hasattr(module, "ipc_collect"):
+                    with suppress(Exception):
+                        module.ipc_collect()
             except Exception as exc:
                 log.warning(
-                    "CUDA memory reclaim failed for gpu_id=%s after %s: %s",
+                    "%s memory reclaim failed for gpu_id=%s after %s: %s",
+                    accel_type,
                     gpu_id,
                     reason,
                     exc,
@@ -553,13 +566,14 @@ def _reclaim_process_cuda_memory(
                 )
         gc.collect()
         log.warning(
-            "CUDA memory reclaim complete after %s on gpu_ids=%s",
+            "%s memory reclaim complete after %s on gpu_ids=%s",
+            accel_type,
             reason,
             gpu_id_list,
         )
     except Exception as exc:
         log.warning(
-            "CUDA memory reclaim skipped after %s: %s",
+            "GPU memory reclaim skipped after %s: %s",
             reason,
             exc,
             exc_info=True,
@@ -573,10 +587,22 @@ def _construct_stage(
 ) -> Stage:
     gpu_id = spec.gpu_id
     if gpu_id is not None:
-        import torch
-
-        torch.cuda.set_device(int(gpu_id))
-        log.info("Set current CUDA device to %s for stage %s", gpu_id, spec.stage_name)
+        accel_type = current_accelerator_type()
+        if accel_type != "cpu":
+            set_device(resolve_device(int(gpu_id), accel_type))
+            log.info(
+                "Set current %s device to %s for stage %s",
+                accel_type,
+                gpu_id,
+                spec.stage_name,
+            )
+        else:
+            log.info(
+                "No GPU accelerator detected; skipping device pin for stage %s "
+                "(gpu_id=%s)",
+                spec.stage_name,
+                gpu_id,
+            )
 
     # --- Build scheduler via factory ---
     log.info(
