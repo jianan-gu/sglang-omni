@@ -10,6 +10,15 @@ from typing import Any, Callable, Dict, List
 import torch
 import torch.distributed as dist
 
+from sglang_omni.utils.device import (
+    current_accelerator_type,
+    current_device_index,
+    device_count,
+    dist_backend,
+    resolve_device,
+    set_device,
+)
+
 from .base import CreditAllocator, Relay, RelayOperation, register_relay
 
 logger = logging.getLogger(__name__)
@@ -41,25 +50,28 @@ class Connection:
                 f"Invalid rank in topology: send={send_ranks}, recv={recv_ranks}, world_size={world_size}"
             )
 
+        accel_type = current_accelerator_type()
+
         if not dist.is_initialized():
             os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
             os.environ.setdefault("MASTER_PORT", "29500")
 
-            if torch.cuda.is_available():
-                self.device_id = rank % torch.cuda.device_count()
-                torch.cuda.set_device(self.device_id)
+            n_devices = device_count(accel_type)
+            if n_devices:
+                self.device_id = rank % n_devices
+                set_device(resolve_device(self.device_id, accel_type))
             else:
                 self.device_id = 0
 
             dist.init_process_group(
-                "nccl",
+                dist_backend(accel_type),
                 rank=rank,
                 world_size=world_size,
-                device_id=torch.device(f"cuda:{self.device_id}"),
+                device_id=resolve_device(self.device_id, accel_type),
             )
         else:
             self.device_id = (
-                torch.cuda.current_device() if torch.cuda.is_available() else 0
+                current_device_index(accel_type) if device_count(accel_type) else 0
             )
 
         self.group = dist.new_group(list(range(world_size)))
@@ -177,15 +189,17 @@ class NcclRelay(Relay):
         self.engine_id = engine_id
         self.device = device
 
+        accel_type = current_accelerator_type()
+
         self.device_id = 0
-        if "cuda" in device and ":" in device:
+        if ":" in device:
             try:
                 self.device_id = int(device.split(":")[1])
             except ValueError:
                 self.device_id = 0
 
-        if torch.cuda.is_available():
-            torch.cuda.set_device(self.device_id)
+        if device_count(accel_type):
+            set_device(resolve_device(self.device_id, accel_type))
 
         if rank is None:
             rank = int(os.environ.get("RANK", 0))
@@ -210,7 +224,9 @@ class NcclRelay(Relay):
             f"[{engine_id}] Initialized NCCL Relay on {device} (Rank {rank}). Starting Warmup..."
         )
 
-        dummy_tensor = torch.tensor([1.0], device=f"cuda:{self.device_id}")
+        dummy_tensor = torch.tensor(
+            [1.0], device=resolve_device(self.device_id, accel_type)
+        )
         warmup_reqs = []
 
         try:

@@ -10,8 +10,10 @@ from sglang.srt.utils import (
     add_prefix,
     is_cuda,
     is_flashinfer_available,
+    is_hip,
     is_non_idle_and_non_empty,
     is_npu,
+    is_xpu,
     make_layers,
 )
 
@@ -24,7 +26,9 @@ __all__ = [
     "add_prefix",
     "is_cuda",
     "is_flashinfer_available",
+    "is_hip",
     "is_non_idle_and_non_empty",
     "is_npu",
+    "is_xpu",
     "make_layers",
 ]

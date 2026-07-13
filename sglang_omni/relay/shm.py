@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from sglang_omni.utils.device import synchronize
+
 from .base import Relay, RelayOperation, register_relay
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def shm_create_from_tensor(tensor: torch.Tensor) -> _shm.SharedMemory:
     """Creates a SHM block and writes tensor data into it (optimized single copy)."""
-    t_cpu = tensor.cpu() if tensor.is_cuda else tensor
+    t_cpu = tensor.cpu() if tensor.device.type != "cpu" else tensor
     t_np = t_cpu.numpy().reshape(-1)
     size = t_np.nbytes
 
@@ -102,8 +104,8 @@ class ShmGetOperation(ShmOperation):
                 copy_len = min(dest_view.numel(), size)
                 dest_view[:copy_len].copy_(src_tensor[:copy_len])
 
-                if self._dest_tensor.is_cuda:
-                    torch.cuda.synchronize(self._dest_tensor.device)
+                if self._dest_tensor.device.type != "cpu":
+                    synchronize(self._dest_tensor.device)
 
             finally:
                 # 3. Cleanup (Receiver owns lifecycle)

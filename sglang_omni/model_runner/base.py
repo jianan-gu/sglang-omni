@@ -23,6 +23,7 @@ from sglang_omni.scheduling.types import (
     SchedulerRequest,
     sampled_logprobs_to_list,
 )
+from sglang_omni.utils.device import new_event, resolve_device, set_device
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class _PendingStep:
     launch(N+1) writes the other (design.md section 1.4).
     """
 
-    event: Any  # torch.cuda.Event, recorded after post_decode_launch publishes
+    event: Any  # device Event (cuda/xpu/...), recorded after post_decode_launch publishes
     launch_buf: Any  # post_decode_launch return: device snapshot or host staging
     scheduler_output: Any  # this step's SchedulerOutput (routing + output proc)
     forward_batch: Any  # for resolve-time finalize sampling
@@ -80,7 +81,7 @@ class ModelRunner:
     def __init__(self, tp_worker: Any, output_processor: Any):
         self.tp_worker = tp_worker
         self.output_processor = output_processor
-        self.device = torch.device(f"cuda:{tp_worker.gpu_id}")
+        self.device = resolve_device(tp_worker.gpu_id)
         self.model = tp_worker.model_runner.model
 
         # Async decode (one-step lookahead). Inert unless ``_async_enabled`` is set.
@@ -198,7 +199,7 @@ class ModelRunner:
         # under lookahead the host collect (resolve) lags by one step.
         if batch_result.next_token_ids is not None:
             schedule_batch.output_ids = batch_result.next_token_ids
-        event = torch.cuda.Event()
+        event = new_event(self.device.type)
         # Recorded after post_decode_launch publishes this step, so
         # event.query()==True means the launched step's GPU work is done and
         # launch_buf is ready (design.md section 3).
@@ -263,8 +264,7 @@ class ModelRunner:
             ForwardBatch,
         )
 
-        if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+        set_device(self.device)
 
         schedule_batch = scheduler_output.batch_data
         if schedule_batch is None:
