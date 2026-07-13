@@ -26,7 +26,7 @@ from sglang_omni.profiler.event_recorder import emit as _emit_event
 from sglang_omni.profiler.event_recorder import get_recorder as _get_recorder
 from sglang_omni.profiler.event_recorder import set_active_stage as _set_active_stage
 from sglang_omni.profiler.torch_profiler import TorchProfiler
-from sglang_omni.utils.device import current_accelerator_type, resolve_device
+from sglang_omni.utils.device import current_accelerator_type, resolve_device, set_device
 from sglang_omni.proto import (
     AdminMessage,
     AdminResult,
@@ -167,14 +167,15 @@ class Stage:
                 _set_active_stage(self.name)
                 try:
                     if self.gpu_id is not None:
-                        import torch
-
-                        torch.cuda.set_device(int(self.gpu_id))
-                        logger.info(
-                            "Scheduler thread for stage %s set CUDA device to %s",
-                            self.name,
-                            self.gpu_id,
-                        )
+                        accel_type = current_accelerator_type()
+                        if accel_type != "cpu":
+                            set_device(resolve_device(int(self.gpu_id), accel_type))
+                            logger.info(
+                                "Scheduler thread for stage %s set %s device to %s",
+                                self.name,
+                                accel_type,
+                                self.gpu_id,
+                            )
                     self.scheduler.start()
                 except Exception as exc:
                     logger.exception("Scheduler thread for stage %s crashed", self.name)
