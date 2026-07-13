@@ -10,6 +10,7 @@ from sglang_omni.scheduling.generation_batch_policy import (
     build_generation_batch_overrides,
     validate_generation_batch_policy,
 )
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
 
 
 class TtsEngineBuilder(ABC):
@@ -23,7 +24,7 @@ class TtsEngineBuilder(ABC):
         self,
         model_path: str,
         *,
-        device: str = "cuda:0",
+        device: str | None = None,
         gpu_id: int | None = None,
         dtype: str = "bfloat16",
         server_args_overrides: dict[str, Any] | None = None,
@@ -32,8 +33,11 @@ class TtsEngineBuilder(ABC):
         from sglang_omni.scheduling import sglang_backend
 
         checkpoint_dir = self.resolve_checkpoint(model_path)
+        accel_type = current_accelerator_type()
         if gpu_id is not None:
-            device = f"cuda:{gpu_id}"
+            device = str(resolve_device(gpu_id, accel_type))
+        elif device is None:
+            device = str(resolve_device(0, accel_type))
         gpu_id = int(device.split(":")[-1]) if ":" in device else 0
         self.checkpoint_dir = checkpoint_dir
         self.device = device
