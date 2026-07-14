@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -11,6 +12,8 @@ from sglang_omni.scheduling.generation_batch_policy import (
     validate_generation_batch_policy,
 )
 from sglang_omni.utils.device import current_accelerator_type, resolve_device
+
+logger = logging.getLogger(__name__)
 
 
 class TtsEngineBuilder(ABC):
@@ -91,6 +94,18 @@ class TtsEngineBuilder(ABC):
             model_buffer_bs=self.get_model_buffer_bs(model),
         )
 
+        if bool(getattr(server_args, "enable_torch_compile", False)) and accel_type != "cuda":
+            # torch.compile's max-autotune search (this repo's default compile
+            # mode, see qwen3_tts._compile_qwen3_tts_backbone) autotunes on a
+            # much less mature Inductor/Triton backend on non-CUDA devices and
+            # has been observed to stall for hours with no error and no log
+            # output. Skip compilation on non-CUDA accelerators until that
+            # path is validated.
+            logger.info(
+                "Disabling torch.compile: no CUDA accelerator detected (device=%s)",
+                accel_type,
+            )
+            server_args.enable_torch_compile = False
         self.compile_model(model, server_args)
 
         if want_cuda_graph:

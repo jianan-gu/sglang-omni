@@ -3,13 +3,19 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from sglang_omni.utils.device import current_accelerator_type, resolve_device
+
+logger = logging.getLogger(__name__)
 
 
 def create_sglang_whisper_asr_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str = "float16",
     max_running_requests: int = 16,
     max_new_tokens: int = 256,
@@ -35,18 +41,30 @@ def create_sglang_whisper_asr_executor(
         build_sglang_server_args,
     )
 
+    accel_type = current_accelerator_type()
+    if gpu_id is not None:
+        device = str(resolve_device(gpu_id, accel_type))
+    elif device is None:
+        device = str(resolve_device(0, accel_type))
     gpu_id = int(device.split(":")[-1]) if ":" in device else 0
     processor = AutoProcessor.from_pretrained(model_path)
     tokenizer = processor.tokenizer
     generation_config = GenerationConfig.from_pretrained(model_path)
     encoder_token_count = int(processor.feature_extractor.nb_max_frames // 2)
 
+    enable_torch_compile = accel_type == "cuda"
+    if not enable_torch_compile:
+        logger.info(
+            "Disabling torch.compile: no CUDA accelerator detected (device=%s)",
+            accel_type,
+        )
+
     overrides = build_generation_batch_overrides(
         max_running_requests=max_running_requests,
         server_args_overrides=server_args_overrides,
         disable_cuda_graph=False,
         disable_overlap_schedule=True,
-        enable_torch_compile=True,
+        enable_torch_compile=enable_torch_compile,
         mem_fraction_static=mem_fraction_static,
         max_prefill_tokens=4096,
         chunked_prefill_size=4096,
