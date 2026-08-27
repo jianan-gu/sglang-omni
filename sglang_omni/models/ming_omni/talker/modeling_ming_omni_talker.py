@@ -22,8 +22,9 @@ from typing import Any, Iterable, Optional, Tuple
 import torch
 import torch.nn as nn
 import torchaudio
-import torchaudio.compliance.kaldi as kaldi
 from transformers import Qwen2Config, Qwen2Model, StaticCache
+
+from sglang_omni.utils.audio_features import cached_fbank
 
 from .configuration_bailing_talker import MingOmniTalkerConfig
 from .front.number_en import normalize_numbers
@@ -71,7 +72,7 @@ class SpkembExtractor:
         self.target_sr = target_sr
 
     def _extract_spk_embedding(self, speech):
-        feat = kaldi.fbank(speech, num_mel_bins=80, dither=0, sample_frequency=16000)
+        feat = cached_fbank(speech, num_mel_bins=80, sample_frequency=16000)
         feat = feat - feat.mean(dim=0, keepdim=True)
         embedding = (
             self.campplus_session.run(
@@ -1272,7 +1273,7 @@ class MingOmniTalker(nn.Module):
                 text = text[1:]
 
             use_stream = stream
-            all_wavs: list = []
+            total_samples = 0
             next_start_idx = segment_start_idx
 
             segment_max_decode_steps = self.duration_capped_steps(
@@ -1298,14 +1299,12 @@ class MingOmniTalker(nn.Module):
             ):
                 tts_speech = this_tts_speech_dict["tts_speech"]
                 if (
-                    all_wavs
-                    and torch.cat(all_wavs, dim=-1).shape[1]
+                    total_samples
+                    and total_samples
                     / audio_detokenizer.config.sample_rate
                     * (16000 / 5818)
                     >= len(text)
-                    and torch.cat(all_wavs, dim=-1).shape[1]
-                    / audio_detokenizer.config.sample_rate
-                    > 2
+                    and total_samples / audio_detokenizer.config.sample_rate > 2
                 ):
                     break
 
@@ -1332,7 +1331,7 @@ class MingOmniTalker(nn.Module):
                         if this_start_idx == this_end_idx
                         else text_ori[rel_start_idx : rel_end_idx + 1]
                     )
-                    all_wavs.append(tts_speech)
+                    total_samples += tts_speech.shape[-1]
                     yield (
                         tts_speech,
                         this_text_ori,
@@ -1340,7 +1339,7 @@ class MingOmniTalker(nn.Module):
                         this_dura * 1000,
                     )
                 else:
-                    all_wavs.append(tts_speech)
+                    total_samples += tts_speech.shape[-1]
                     yield (
                         tts_speech,
                         text_ori,

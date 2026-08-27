@@ -28,39 +28,50 @@ _THINKER_EMBED_CANDIDATE_KEYS = (
 )
 
 
-def _read_rows_from_safetensor(
-    file_path: Path, tensor_name: str, row_ids: list[int]
-) -> torch.Tensor:
-    with safe_open(str(file_path), framework="pt", device="cpu") as handle:
-        tensor_slice = handle.get_slice(tensor_name)
-        try:
-            rows = [tensor_slice[row_id] for row_id in row_ids]
-            return torch.stack(rows, dim=0)
-        except (IndexError, RuntimeError, TypeError, ValueError):
-            tensor = handle.get_tensor(tensor_name)
-            return tensor[row_ids]
+_EMBED_SOURCE_CACHE: dict[str, tuple[Path, str]] = {}
+_EMBED_HANDLE_CACHE: dict[str, Any] = {}
 
 
-def load_thinker_embedding_rows(model_path: str, row_ids: list[int]) -> torch.Tensor:
+def _resolve_embed_source(model_path: str) -> tuple[Path, str]:
+    cached = _EMBED_SOURCE_CACHE.get(model_path)
+    if cached is not None:
+        return cached
+
     model_dir = Path(model_path)
-
     for index_path in model_dir.glob("*.safetensors.index.json"):
         index_data = json.loads(index_path.read_text())
         weight_map = index_data["weight_map"]
         for tensor_name in _THINKER_EMBED_CANDIDATE_KEYS:
             shard_name = weight_map.get(tensor_name)
             if shard_name is not None:
-                return _read_rows_from_safetensor(
-                    model_dir / shard_name, tensor_name, row_ids
-                )
+                source = (model_dir / shard_name, tensor_name)
+                _EMBED_SOURCE_CACHE[model_path] = source
+                return source
 
     for shard_path in model_dir.glob("*.safetensors"):
         with safe_open(str(shard_path), framework="pt", device="cpu") as handle:
             for tensor_name in _THINKER_EMBED_CANDIDATE_KEYS:
                 if tensor_name in handle.keys():
-                    return _read_rows_from_safetensor(shard_path, tensor_name, row_ids)
+                    source = (shard_path, tensor_name)
+                    _EMBED_SOURCE_CACHE[model_path] = source
+                    return source
 
     raise KeyError(f"Unable to locate thinker embedding weights in {model_path}")
+
+
+def load_thinker_embedding_rows(model_path: str, row_ids: list[int]) -> torch.Tensor:
+    shard_path, tensor_name = _resolve_embed_source(model_path)
+    handle = _EMBED_HANDLE_CACHE.get(model_path)
+    if handle is None:
+        handle = safe_open(str(shard_path), framework="pt", device="cpu")
+        _EMBED_HANDLE_CACHE[model_path] = handle
+    tensor_slice = handle.get_slice(tensor_name)
+    try:
+        rows = [tensor_slice[row_id] for row_id in row_ids]
+    except (IndexError, RuntimeError, TypeError, ValueError):
+        tensor = handle.get_tensor(tensor_name)
+        rows = [tensor[row_id].clone() for row_id in row_ids]
+    return torch.stack(rows, dim=0)
 
 
 def coerce_feature_tensor(value: Any) -> torch.Tensor | None:
@@ -195,19 +206,10 @@ class TalkerPrefillBuilder:
 
         assistant_token_ids = self.extract_chunk_token_ids(thinker_chunks)
         assistant_embed = self._load_prompt_token_embeddings(assistant_token_ids)
-        assistant_hidden = torch.stack(
-            [
-                self.chunk_layer_hidden_or_embed(chunk).to(
-                    device=self._device, dtype=self._dtype
-                )
-                for chunk in thinker_chunks
-            ],
-            dim=0,
-        )
 
         thinker_input_ids = torch.cat([prompt_ids, assistant_token_ids], dim=0)
         thinker_embed = torch.cat([prompt_embed, assistant_embed], dim=0)
-        thinker_hidden = torch.cat([prompt_hidden, assistant_hidden], dim=0)
+        thinker_hidden = torch.cat([prompt_hidden, assistant_embed], dim=0)
         multimodal_mask = self.build_multimodal_mask(thinker_input_ids)
 
         tts_bos_embed, tts_eos_embed, tts_pad_embed = self.get_tts_special_embeds()
@@ -251,7 +253,7 @@ class TalkerPrefillBuilder:
         }
 
     def append_text_chunk(self, req_data: Any, chunk: Any) -> None:
-        if getattr(req_data, "thinker_chunks_done", False):
+        if req_data.thinker_chunks_done:
             return
 
         metadata = chunk.metadata or {}
@@ -281,13 +283,6 @@ class TalkerPrefillBuilder:
             metadata = chunk.metadata or {}
             token_ids.append(int(metadata["token_id"]))
         return torch.tensor(token_ids, dtype=torch.long)
-
-    def chunk_layer_hidden_or_embed(self, chunk: Any) -> torch.Tensor:
-        metadata = chunk.metadata or {}
-        layer_hidden = metadata.get("layer_hidden")
-        if isinstance(layer_hidden, torch.Tensor):
-            return layer_hidden
-        return chunk.data
 
     def project_assistant_chunk(self, chunk: Any) -> torch.Tensor:
         metadata = chunk.metadata or {}

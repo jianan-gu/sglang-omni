@@ -15,10 +15,12 @@ import torch
 
 from sglang_omni.models.voxtral_tts.io import VoxtralTTSState
 from sglang_omni.models.voxtral_tts.pipeline.state_io import load_state, store_state
+from sglang_omni.platforms import current_platform
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.vocoder_base import BatchVocoderBase
 from sglang_omni.utils.audio_payload import audio_waveform_payload
+from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +40,6 @@ def _import_mistral_common_for_voxtral():
     except ImportError as exc:
         raise RuntimeError(_VOXTRAL_MISTRAL_COMMON_HINT) from exc
     return SpeechRequest, MistralTokenizer
-
-
-def _resolve_checkpoint(checkpoint: str) -> str:
-    if os.path.isdir(checkpoint):
-        return checkpoint
-    from huggingface_hub import snapshot_download
-
-    return snapshot_download(checkpoint)
 
 
 def _validate_voxtral_speech_params(
@@ -230,16 +224,17 @@ def _load_voxtral_voice_embeddings(
     voice_dir = os.path.join(checkpoint_dir, "voice_embedding")
     if not os.path.isdir(voice_dir):
         return voice_embeddings
+    map_location = "cpu" if current_platform.is_musa() else device
     for fname in sorted(os.listdir(voice_dir)):
         if not fname.endswith(".pt"):
             continue
         name = fname.removesuffix(".pt")
         emb = torch.load(
             os.path.join(voice_dir, fname),
-            map_location=device,
+            map_location=map_location,
             weights_only=True,
         )
-        voice_embeddings[name] = emb.to(dtype=torch.bfloat16)
+        voice_embeddings[name] = emb.to(device=device, dtype=torch.bfloat16)
     return voice_embeddings
 
 

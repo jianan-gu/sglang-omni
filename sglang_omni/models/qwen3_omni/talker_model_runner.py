@@ -6,9 +6,12 @@ from __future__ import annotations
 from typing import Any
 
 import torch
-from sglang.srt.managers.scheduler import GenerationBatchResult
 
 from sglang_omni.model_runner.base import ModelRunner
+from sglang_omni.model_runner.prefill_inputs import (
+    OmniPrefillInputs,
+    attach_omni_prefill_inputs,
+)
 from sglang_omni.scheduling.messages import OutgoingMessage
 
 
@@ -31,14 +34,23 @@ class QwenTalkerModelRunner(ModelRunner):
     def execute(self, scheduler_output: Any):
         return super().execute(scheduler_output)
 
-    def custom_prefill_forward(
+    def before_prefill(
         self,
         forward_batch: Any,
         schedule_batch: Any,
         requests: list,
-    ) -> GenerationBatchResult | None:
-        return self._run_projected_prefill_forward(
-            forward_batch, schedule_batch, requests
+    ) -> None:
+        del schedule_batch
+        composed = self._compose_prefill_embeds(forward_batch, requests)
+        if composed is None:
+            return
+        input_embeds, input_embeds_are_projected = composed
+        attach_omni_prefill_inputs(
+            forward_batch,
+            OmniPrefillInputs(
+                input_embeds=input_embeds,
+                input_embeds_are_projected=input_embeds_are_projected,
+            ),
         )
 
     def before_decode(
@@ -84,7 +96,7 @@ class QwenTalkerModelRunner(ModelRunner):
         if isinstance(talker_hidden, torch.Tensor) and talker_hidden.ndim == 2:
             talker_hidden = talker_hidden.unsqueeze(1)
         self.model.code_predictor_forward(layer0_codes, talker_hidden)
-        schedule_batch.output_ids = result.next_token_ids
+        self._stage_token_ids(result, result.next_token_ids)
         self._emit_code_chunks_and_feedback(
             schedule_batch=schedule_batch,
             requests=requests,
@@ -102,7 +114,7 @@ class QwenTalkerModelRunner(ModelRunner):
 
         batch_size = len(requests)
         result.next_token_ids = self.model._sampled_token_ids[:batch_size].clone()
-        schedule_batch.output_ids = result.next_token_ids
+        self._stage_token_ids(result, result.next_token_ids)
         self._emit_code_chunks_and_feedback(
             schedule_batch=schedule_batch,
             requests=requests,
@@ -114,10 +126,16 @@ class QwenTalkerModelRunner(ModelRunner):
         schedule_batch: Any,
         requests: list,
     ) -> None:
+        bs = len(requests)
+        # Note (wenyao): one batched clone per buffer, not one per row: the
+        # snapshot must be a fresh allocation so its rows survive the next
+        # in-graph write to the fixed-address _output_codes/_output_embeds.
+        codes_snap = self.model._output_codes[:bs].detach().clone()
+        embeds_snap = self.model._output_embeds[:bs].detach().clone()
         for idx, sched_req in enumerate(requests):
             req = schedule_batch.reqs[idx]
-            code_chunk = self.model._output_codes[idx].detach().clone()
-            feedback_row = self.model._output_embeds[idx].detach().clone()
+            code_chunk = codes_snap[idx]
+            feedback_row = embeds_snap[idx]
             # Tell code2wav whether to forward audio chunks to the Coordinator.
             stage_payload = sched_req.data.stage_payload
             is_streaming = bool(
@@ -155,22 +173,21 @@ class QwenTalkerModelRunner(ModelRunner):
             for req in schedule_batch.reqs
         )
 
-    def _run_projected_prefill_forward(
+    def _compose_prefill_embeds(
         self,
         forward_batch: Any,
-        schedule_batch: Any,
         requests: list,
-    ) -> GenerationBatchResult | None:
-        del schedule_batch
-        has_projected = forward_batch.input_embeds is not None or any(
-            bool(req.data.input_embeds_are_projected) for req in requests
-        )
-        if not has_projected:
-            return None
-
+    ) -> tuple[torch.Tensor, bool] | None:
+        """Assemble prefill rows and preserve whether they are projected."""
         projected_flags = [
             bool(req.data.input_embeds_are_projected) for req in requests
         ]
+        has_tensor_requests = any(
+            req.data.prefill_input_embeds is not None for req in requests
+        )
+        if not any(projected_flags) and not has_tensor_requests:
+            return None
+
         has_projected_requests = any(projected_flags)
         if has_projected_requests and not all(projected_flags):
             raise RuntimeError(
@@ -178,41 +195,36 @@ class QwenTalkerModelRunner(ModelRunner):
                 "batched together"
             )
 
-        input_embeds_are_projected = has_projected_requests
-        input_embeds = forward_batch.input_embeds
-        if has_projected_requests:
-            parts: list[torch.Tensor] = []
-            for sched_req in requests:
-                req = sched_req.data.req
-                prefix_len = len(req.prefix_indices)
-                extend_len = int(req.extend_input_len)
-                part = self._projected_prefill_slice(
-                    sched_req=sched_req,
-                    prefix_len=prefix_len,
-                    extend_len=extend_len,
-                    device=forward_batch.input_ids.device,
-                )
-                if part is not None and part.shape[0] > 0:
-                    parts.append(part)
-            if not parts:
-                return None
-            input_embeds = torch.cat(parts, dim=0)
-        elif input_embeds is None:
+        parts: list[torch.Tensor] = []
+        for sched_req in requests:
+            req = sched_req.data.req
+            prefix_len = len(req.prefix_indices)
+            extend_len = int(req.extend_range.length)
+            part = self._projected_prefill_slice(
+                sched_req=sched_req,
+                prefix_len=prefix_len,
+                extend_len=extend_len,
+                device=forward_batch.input_ids.device,
+            )
+            if part is not None and part.shape[0] > 0:
+                parts.append(part)
+        if not parts:
             return None
+        input_embeds = torch.cat(parts, dim=0)
 
         expected_rows = int(forward_batch.input_ids.shape[0])
         if input_embeds.shape[0] != expected_rows:
             raise RuntimeError(
-                "Talker projected prefill embeds must align with forward input_ids: "
+                "Talker prefill embeds must align with forward input_ids: "
                 f"got {input_embeds.shape[0]} rows for {expected_rows} input ids"
             )
-
-        result = self._forward_with_input_embeds(
-            forward_batch,
-            input_embeds=input_embeds,
-            input_embeds_are_projected=input_embeds_are_projected,
+        return (
+            input_embeds.to(
+                device=forward_batch.input_ids.device,
+                dtype=self.model.activation_dtype,
+            ),
+            has_projected_requests,
         )
-        return result
 
     @staticmethod
     def _projected_prefill_slice(
@@ -357,11 +369,18 @@ class QwenTalkerModelRunner(ModelRunner):
             self._append_decode_input_history(sched_req.data, combined)
             rows.append(row_idx)
             embeds.append(combined)
-        if rows:
-            rows_t = torch.tensor(rows, dtype=torch.long, device=feedback_buffer.device)
-            embeds_stacked = torch.stack(embeds, dim=0)
-            feedback_buffer[rows_t] = embeds_stacked
-            feedback_mask[rows_t] = True
+        if not rows:
+            return
+        embeds_stacked = torch.stack(embeds, dim=0)
+        if len(rows) == batch_size:
+            # Note (wenyao): dense steady state: rows is exactly range(batch_size),
+            # so slice-assign and skip the per-frame pageable index H2D
+            feedback_buffer[:batch_size] = embeds_stacked
+            feedback_mask[:batch_size] = True
+            return
+        rows_t = torch.tensor(rows, dtype=torch.long, device=feedback_buffer.device)
+        feedback_buffer[rows_t] = embeds_stacked
+        feedback_mask[rows_t] = True
 
     @staticmethod
     def _data_has_next_decode_input(data: Any) -> bool:
@@ -374,7 +393,7 @@ class QwenTalkerModelRunner(ModelRunner):
         if pending_text_queue:
             return True
         return bool(
-            getattr(data, "thinker_chunks_done", False)
+            data.thinker_chunks_done
             and getattr(data, "tts_pad_embed", None) is not None
         )
 
@@ -482,45 +501,3 @@ class QwenTalkerModelRunner(ModelRunner):
         if getattr(data, "pending_text_queue", None):
             QwenTalkerModelRunner._pop_left(data.pending_text_queue)
         return combined
-
-    def _forward_with_input_embeds(
-        self,
-        forward_batch: Any,
-        *,
-        input_embeds: torch.Tensor,
-        input_deepstack_embeds: torch.Tensor | None = None,
-        input_deepstack_mask: torch.Tensor | None = None,
-        input_embeds_are_projected: bool = False,
-    ) -> GenerationBatchResult:
-        model_runner = self.tp_worker.model_runner
-        model_dtype = self.model.activation_dtype
-
-        model_runner.attn_backend.init_forward_metadata(forward_batch)
-
-        positions = forward_batch.positions
-        if forward_batch.mrope_positions is not None:
-            positions = forward_batch.mrope_positions
-
-        input_embeds = input_embeds.to(
-            device=forward_batch.input_ids.device,
-            dtype=model_dtype,
-        )
-        if input_deepstack_embeds is not None:
-            input_deepstack_embeds = input_deepstack_embeds.to(
-                device=forward_batch.input_ids.device,
-                dtype=model_dtype,
-            )
-
-        logits_output = self.model(
-            input_ids=forward_batch.input_ids,
-            positions=positions,
-            forward_batch=forward_batch,
-            input_embeds=input_embeds,
-            input_deepstack_embeds=input_deepstack_embeds,
-            input_deepstack_mask=input_deepstack_mask,
-            input_embeds_are_projected=input_embeds_are_projected,
-        )
-        return GenerationBatchResult(
-            logits_output=logits_output,
-            can_run_cuda_graph=False,
-        )

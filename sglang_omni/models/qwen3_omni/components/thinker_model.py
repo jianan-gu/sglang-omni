@@ -4,15 +4,14 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import torch
-from sgl_kernel import fused_qk_norm_rope
+from sglang.srt.runtime_context import get_parallel, get_stream
 from torch import nn
 from transformers import PretrainedConfig
 
 from sglang_omni.models.qwen3_omni.hf_config import Qwen3OmniMoeTextConfig
-from sglang_omni.models.qwen3_omni.quantization import (
-    convert_fp8_weight_scale_inv_for_sglang,
-)
 from sglang_omni.models.weight_loader import default_weight_loader
+from sglang_omni.platforms import current_platform
+from sglang_omni.quantization import get_weight_preprocessor
 from sglang_omni.utils import add_prefix
 from sglang_omni.vendor.sglang.core import ForwardBatch
 from sglang_omni.vendor.sglang.distributed import (
@@ -33,8 +32,6 @@ from sglang_omni.vendor.sglang.layers import (
     RowParallelLinear,
     TopK,
     VocabParallelEmbedding,
-    get_attention_tp_rank,
-    get_attention_tp_size,
     get_moe_impl_class,
     get_rope,
     should_use_flashinfer_cutlass_moe_fp4_allgather,
@@ -46,6 +43,8 @@ from sglang_omni.vendor.sglang.models import (
 )
 from sglang_omni.vendor.sglang.server_args import get_global_server_args
 from sglang_omni.vendor.sglang.utils import make_layers
+
+fused_qk_norm_rope = current_platform.get_fused_qk_norm_rope()
 
 logger = logging.getLogger(__name__)
 
@@ -161,14 +160,14 @@ class Qwen3OmniMoeThinkerTextAttention(nn.Module):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         dual_chunk_attention_config: Optional[dict[str, Any]] = None,
-        alt_stream: Optional[torch.cuda.Stream] = None,
+        alt_stream: Optional[torch.Stream] = None,
     ) -> None:
         super().__init__()
         self.hidden_size = hidden_size
         self.layer_id = layer_id
 
-        attn_tp_rank = get_attention_tp_rank()
-        attn_tp_size = get_attention_tp_size()
+        attn_tp_rank = get_parallel().attn_tp_rank
+        attn_tp_size = get_parallel().attn_tp_size
 
         self.config = config
         self.total_num_heads = num_heads
@@ -232,6 +231,7 @@ class Qwen3OmniMoeThinkerTextAttention(nn.Module):
         self.use_fused_qk_norm_rope = (
             get_global_server_args().enable_fused_qk_norm_rope
             and self.compatible_with_fused_qk_norm_rope
+            and fused_qk_norm_rope is not None
         )
         self._used_fused_qk_norm_rope_last_call = False
         self._used_fused_set_kv_buffer_last_call = False
@@ -309,7 +309,8 @@ class Qwen3OmniMoeThinkerTextAttention(nn.Module):
                 alt_stream=self.alt_stream,
             )
             use_fused_set_kv_buffer = (
-                enable_fused_set_kv_buffer(forward_batch)
+                current_platform.is_cuda()
+                and enable_fused_set_kv_buffer(forward_batch)
                 and self.compatible_with_fused_kv_buffer
             )
             q, k = self.rotary_emb(
@@ -473,7 +474,7 @@ class Qwen3OmniMoeThinkerTextDecoderLayer(nn.Module):
         layer_id: int,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
-        alt_stream: Optional[torch.cuda.Stream] = None,
+        alt_stream: Optional[torch.Stream] = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -505,8 +506,8 @@ class Qwen3OmniMoeThinkerTextDecoderLayer(nn.Module):
 
         self.layer_id = layer_id
 
-        self.attn_tp_size = get_attention_tp_size()
-        self.attn_tp_rank = get_attention_tp_rank()
+        self.attn_tp_size = get_parallel().attn_tp_size
+        self.attn_tp_rank = get_parallel().attn_tp_rank
 
         # Qwen3MoE all layers are sparse and have no nextn now
         self.is_layer_sparse = True
@@ -625,7 +626,7 @@ class Qwen3OmniMoeThinkerTextModel(nn.Module):
             prefix=add_prefix(prefix, "embed_tokens"),
         )
 
-        alt_stream = torch.cuda.Stream()
+        alt_stream = get_stream("alt") if current_platform.is_cuda() else None
         result = make_layers(
             config.num_hidden_layers,
             lambda idx, prefix: Qwen3OmniMoeThinkerTextDecoderLayer(
@@ -637,13 +638,9 @@ class Qwen3OmniMoeThinkerTextModel(nn.Module):
             ),
             prefix=add_prefix("layers", prefix),
         )
-        # make_layers returns (layers, start, end) with PP args, else just layers
-        if isinstance(result, tuple):
-            self.layers, self.start_layer, self.end_layer = result
-        else:
-            self.layers = result
-            self.start_layer = 0
-            self.end_layer = config.num_hidden_layers
+        self.layers = result
+        self.start_layer = 0
+        self.end_layer = config.num_hidden_layers
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
         # For EAGLE3 support
@@ -723,11 +720,16 @@ class Qwen3OmniMoeThinkerTextModel(nn.Module):
         """
         params_dict = self._cached_params_dict
 
+        preprocess_weight = get_weight_preprocessor(
+            self.config, fp8_scale_inverted=True
+        )
+
         for name, loaded_weight in weights:
             if maybe_update_fused_qkv_proj(
                 params_dict=params_dict,
                 name=name,
                 loaded_weight=loaded_weight,
+                preprocess_weight=preprocess_weight,
             ):
                 continue
             elif maybe_update_fused_moe_proj(
@@ -735,14 +737,13 @@ class Qwen3OmniMoeThinkerTextModel(nn.Module):
                 name=name,
                 loaded_weight=loaded_weight,
                 config=self.config,
+                preprocess_weight=preprocess_weight,
             ):
                 continue
             else:
                 if name in params_dict.keys():
                     param = params_dict[name]
-                    loaded_weight = convert_fp8_weight_scale_inv_for_sglang(
-                        name, loaded_weight
-                    )
+                    loaded_weight = preprocess_weight(name, loaded_weight)
                     param.weight_loader(param, loaded_weight)
                     continue
             logger.warning(f"Parameter {name} not found in params_dict")
@@ -752,6 +753,7 @@ def maybe_update_fused_qkv_proj(
     params_dict,
     name,
     loaded_weight,
+    preprocess_weight,
 ):
     stacked_params_mapping = {
         "q_proj": ("qkv_proj", "q"),
@@ -771,13 +773,15 @@ def maybe_update_fused_qkv_proj(
 
             name = name.replace(shard_name, fused_param_name)
             param = params_dict[name]
-            loaded_weight = convert_fp8_weight_scale_inv_for_sglang(name, loaded_weight)
+            loaded_weight = preprocess_weight(name, loaded_weight)
             param.weight_loader(param, loaded_weight, shard_id)
             return True
     return False
 
 
-def maybe_update_fused_moe_proj(params_dict, name, loaded_weight, config):
+def maybe_update_fused_moe_proj(
+    params_dict, name, loaded_weight, config, preprocess_weight
+):
     # replace FusedMoE.make_expert_params_mapping
     if res := extract_fused_experts(
         name=name,
@@ -792,7 +796,7 @@ def maybe_update_fused_moe_proj(params_dict, name, loaded_weight, config):
 
         if name in params_dict:
             param = params_dict[name]
-            loaded_weight = convert_fp8_weight_scale_inv_for_sglang(name, loaded_weight)
+            loaded_weight = preprocess_weight(name, loaded_weight)
             param.weight_loader(
                 param,
                 loaded_weight,
