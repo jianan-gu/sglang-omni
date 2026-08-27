@@ -30,6 +30,13 @@ _CACHE_MAX_ENTRIES = 1024
 _SHUTDOWN = object()
 
 
+def _accelerator_module(device: torch.device):
+    """Return the torch stream submodule (cuda/xpu) for a device, else None."""
+    if device.type in ("cuda", "xpu"):
+        return getattr(torch, device.type, None)
+    return None
+
+
 def build_cache_namespace(
     model: Any,
     *,
@@ -97,9 +104,10 @@ class WhisperPreLMEncoderService(PreLMEncoderService[Any, torch.Tensor, torch.Te
         self._device = reference.device
         self._dtype = reference.dtype
         self._hidden_size = int(model.config.d_model)
+        self._stream_module = _accelerator_module(self._device)
         self._stream = (
-            torch.cuda.Stream(device=self._device)
-            if self._device.type == "cuda"
+            self._stream_module.Stream(device=self._device)
+            if self._stream_module is not None
             else None
         )
 
@@ -380,8 +388,8 @@ class WhisperPreLMEncoderService(PreLMEncoderService[Any, torch.Tensor, torch.Te
 
     def attach_embedding(self, item: Any, embedding: torch.Tensor) -> None:
         embedding = embedding.to(self._device, non_blocking=True)
-        if self._stream is not None and embedding.is_cuda:
-            embedding.record_stream(torch.cuda.default_stream(self._device))
+        if self._stream is not None and embedding.device.type == self._device.type:
+            embedding.record_stream(self._stream_module.default_stream(self._device))
         item.precomputed_embeddings = embedding
         item.feature = None
         item.format = MultimodalInputFormat.PRECOMPUTED_EMBEDDING
@@ -418,7 +426,7 @@ class WhisperPreLMEncoderService(PreLMEncoderService[Any, torch.Tensor, torch.Te
             if self._stream is None:
                 yield
             else:
-                with torch.cuda.stream(self._stream):
+                with self._stream_module.stream(self._stream):
                     yield
 
     def encode_batch(self, items: list[Any]) -> torch.Tensor:
