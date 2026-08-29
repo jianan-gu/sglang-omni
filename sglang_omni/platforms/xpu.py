@@ -34,6 +34,11 @@ class XPUOmniPlatform(OmniPlatform):
     def enable_code2wav_graph(self):
         return False
 
+    def cross_attention_backend(self) -> str | None:
+        # SGLang defaults Whisper cross attention to flashinfer (CUDA-only) and the
+        # intel_xpu backend miscomputes it; torch_native is correct on XPU.
+        return "torch_native"
+
     def get_fused_qk_norm_rope_with_cos_sin_cache(self):
         try:
             from sgl_kernel import fused_inplace_qknorm_rope

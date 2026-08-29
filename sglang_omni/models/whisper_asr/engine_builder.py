@@ -251,13 +251,11 @@ class WhisperASREngineBuilder(AsrEngineBuilder):
             "sampling_backend": "pytorch",
             "dtype": dtype,
         }
-        # SGLang forces flashinfer (CUDA-only) as Whisper's default attention
-        # backend for cross-attention CUDA-graph support. On Intel XPU use the
-        # torch_native backend: it supports encoder-decoder cross attention and
-        # runs correctly through torch.xpu (the intel_xpu backend miscomputes
-        # Whisper cross attention).
-        if current_platform.device_type == "xpu":
-            defaults["attention_backend"] = "torch_native"
+        # The platform owns whether Whisper's encoder-decoder cross attention
+        # needs a specific backend (SGLang's default forces CUDA-only flashinfer).
+        cross_attn_backend = current_platform.cross_attention_backend()
+        if cross_attn_backend is not None:
+            defaults["attention_backend"] = cross_attn_backend
         return defaults
 
     def make_adapters(self, model: Any) -> tuple[Any, Any]:
