@@ -26,7 +26,11 @@ RUN apt-get update && \
     libtbb-dev \
     libnuma-dev \
     numactl \
-    sox
+    sox \
+    # torchcodec loads FFmpeg's shared libraries at import time, and every
+    # CPU-supported model here takes audio input, so these are not optional.
+    ffmpeg \
+    libsndfile1
 
 WORKDIR /opt
 

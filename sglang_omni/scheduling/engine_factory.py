@@ -54,6 +54,7 @@ class SGLangGenerationEngineBuilder(ABC):
     ) -> Any:
         import torch
 
+        from sglang_omni.platforms import current_platform
         from sglang_omni.scheduling import bootstrap as scheduling_bootstrap
         from sglang_omni.scheduling import sglang_backend
         from sglang_omni.utils.device import place_device_spec, resolve_device_spec
@@ -76,9 +77,16 @@ class SGLangGenerationEngineBuilder(ABC):
         # CUDA-first ladder that can contradict placement, so resolve it from the
         # placement we just computed and feed it forward.
         resolved_type = torch.device(device).type
-        if resolved_type == "cpu":
-            # There is no CUDA graph to capture on CPU, and a stage default asking
-            # for one would fail during capture rather than at config time.
+        # Ask the platform rather than testing the device type here (RFC #1310:
+        # shared code queries the platform for a feature's status). The extra cpu
+        # arm covers a stage explicitly placed on cpu while the host itself is an
+        # accelerator, where current_platform still reports capture support.
+        if (
+            resolved_type == "cpu"
+            or not current_platform.supports_generation_cuda_graph()
+        ):
+            # A stage default asking for a graph would otherwise fail inside
+            # capture rather than at configuration time.
             server_args_overrides = dict(server_args_overrides or {})
             server_args_overrides["disable_cuda_graph"] = True
 

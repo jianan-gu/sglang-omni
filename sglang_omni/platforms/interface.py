@@ -60,3 +60,12 @@ class OmniPlatform(DeviceMixin):
     def enable_code2wav_graph(self):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
+
+    def supports_generation_cuda_graph(self) -> bool:
+        """Whether this platform can capture a generation CUDA graph.
+
+        Asked by the shared engine builder instead of testing the device type
+        there, so a platform that cannot capture is refused at configuration
+        time rather than failing inside capture.
+        """
+        return True

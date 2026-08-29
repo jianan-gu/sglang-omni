@@ -37,6 +37,9 @@ dependencies = [
     "torch==2.12.0",
     "torchvision==0.27.0",
     "torchaudio==2.11.0",
+    # utils/audio.py decodes through torchcodec; without it every audio-input
+    # model fails at load time. 0.12 is the release paired with torch 2.12.
+    "torchcodec==0.12.0",
     "transformers==5.12.1",
 
     # Model loading and processing

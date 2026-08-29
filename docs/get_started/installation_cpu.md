@@ -104,6 +104,35 @@ dependencies, you can also run the Qwen3-TTS unit tests:
 pytest tests/unit_test/qwen3_tts -v
 ```
 
+CPU-specific unit tests live in one directory, so CI (and you) can select them
+without touching the accelerator suites:
+
+```bash
+SGLANG_USE_CPU_ENGINE=1 pytest tests/unit_test/cpu -v
+```
+
+> **`SGLANG_USE_CPU_ENGINE=1` is required at runtime.** Without it the platform
+> layer reports `device_type == "cpu"` while `is_cpu()` stays `False`, so code
+> that branches on the platform silently takes the accelerator path.
+
+### Audio decoding fails with `libtorchcodec_core*.so`
+
+`utils/audio.py` decodes through `torchcodec`, which loads FFmpeg's shared
+libraries at import. Two mismatches show up as the same unhelpful
+`Could not load this library` error:
+
+- **FFmpeg too new.** `torchcodec` ships loaders for FFmpeg majors 4–8 only;
+  FFmpeg 9 satisfies none of them. Pin an older major (`conda install -c
+  conda-forge 'ffmpeg=7.*'`). Docker users get a supported major from `apt`.
+- **conda on an older distro.** conda's FFmpeg needs a newer `libstdc++` than
+  `/lib64` provides, and the system copy wins the link order. The env already
+  ships a suitable one — put it first:
+
+  ```bash
+  LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6" python -c \
+    "from torchcodec.decoders import AudioDecoder"
+  ```
+
 ## Serve Qwen3-TTS
 
 Run with the CPU engine enabled:
