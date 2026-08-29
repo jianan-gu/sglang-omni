@@ -362,7 +362,9 @@ class WhisperASREngineBuilder(AsrEngineBuilder):
         overrides["cuda_graph_bs_prefill"] = build_default_prefill_cuda_graph_bs(cap)
 
     def generation_defaults(self, *, dtype: str) -> dict[str, Any]:
-        return {
+        from sglang_omni.platforms import current_platform
+
+        defaults: dict[str, Any] = {
             "max_running_requests": self.max_running_requests,
             "disable_cuda_graph": False,
             "disable_overlap_schedule": True,
@@ -374,6 +376,14 @@ class WhisperASREngineBuilder(AsrEngineBuilder):
             "dtype": dtype,
             "cuda_graph_backend_prefill": CudaGraphBackend.BREAKABLE,
         }
+        # SGLang forces flashinfer (CUDA-only) as Whisper's default attention
+        # backend for cross-attention CUDA-graph support. On Intel XPU use the
+        # torch_native backend: it supports encoder-decoder cross attention and
+        # runs correctly through torch.xpu (the intel_xpu backend miscomputes
+        # Whisper cross attention).
+        if current_platform.device_type == "xpu":
+            defaults["attention_backend"] = "torch_native"
+        return defaults
 
     def make_adapters(self, model: Any) -> tuple[Any, Any]:
         del model
