@@ -72,6 +72,16 @@ class SGLangGenerationEngineBuilder(ABC):
 
         self.pre_infra_setup(checkpoint_dir)
 
+        # SGLang owns the device type, not the index. Left unset it re-detects off a
+        # CUDA-first ladder that can contradict placement, so resolve it from the
+        # placement we just computed and feed it forward.
+        resolved_type = torch.device(device).type
+        if resolved_type == "cpu":
+            # There is no CUDA graph to capture on CPU, and a stage default asking
+            # for one would fail during capture rather than at config time.
+            server_args_overrides = dict(server_args_overrides or {})
+            server_args_overrides["disable_cuda_graph"] = True
+
         operator_selected_prefill_backend = _operator_selected_prefill_graph_backend(
             server_args_overrides
         )
@@ -80,9 +90,6 @@ class SGLangGenerationEngineBuilder(ABC):
             **self.generation_defaults(dtype=dtype),
         )
         self.adjust_overrides(overrides)
-        # Left unset, SGLang re-detects off a CUDA-first ladder that can contradict
-        # placement. It owns the type, not the index.
-        resolved_type = torch.device(device).type
         requested_type = overrides.get("device")
         if requested_type is not None and requested_type != resolved_type:
             raise ValueError(
