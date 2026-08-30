@@ -24,6 +24,9 @@ _MODELS = sorted(
 # Every stage that relies on device=None. Adding one means adding a test below that
 # proves the factory resolves it.
 _NONE_DEVICE_STAGES = {
+    ("moss_tts", "preprocessing"),
+    ("moss_tts", "tts_engine"),
+    ("moss_tts", "vocoder"),
     ("qwen3_asr", "asr"),
     ("qwen3_omni", "audio_encoder"),
     ("qwen3_omni", "code2wav"),
@@ -142,3 +145,108 @@ def test_qwen3_asr_stage_forwards_none_to_the_shared_builder(
     # Placement injects gpu_id only when the signature declares it. Without it the
     # builder resolved a bare accelerator and told SGLang card 0.
     assert seen["gpu_id"] == 1
+
+
+def test_whisper_asr_stage_forwards_none_to_the_shared_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same contract as Qwen3-ASR, and the reason Whisper joined the list above.
+
+    The stage used to pin ``device="cuda:0"``. An explicit device is honored
+    rather than retargeted, so that literal followed the stage onto a CPU host
+    and only failed once SGLang called torch.cuda.set_device.
+    """
+    from sglang_omni.models.whisper_asr import stages
+    from sglang_omni.scheduling import engine_factory
+
+    seen: dict[str, object] = {}
+
+    def spy_build(self, model_path, **kwargs):
+        del self, model_path
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        engine_factory.SGLangGenerationEngineBuilder, "build", spy_build
+    )
+
+    stages.create_sglang_whisper_asr_executor("unused", device=None)
+
+    assert "device" in seen, "the factory did not route through the shared builder"
+    assert seen["device"] is None
+
+
+def test_moss_tts_engine_stage_forwards_none_to_the_shared_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The engine stage used to pin ``device="cuda:0"`` in its signature default,
+    which the config never overrode, so the literal followed the stage onto a CPU
+    host and died at torch.cuda.set_device.
+    """
+    from sglang_omni.models.moss_tts import stages
+    from sglang_omni.scheduling import engine_factory
+
+    seen: dict[str, object] = {}
+
+    def spy_build(self, model_path, **kwargs):
+        del self, model_path
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        engine_factory.SGLangGenerationEngineBuilder, "build", spy_build
+    )
+
+    stages.create_sglang_tts_engine_executor("unused")
+
+    assert "device" in seen, "the factory did not route through the shared builder"
+    assert seen["device"] is None
+
+
+def test_moss_tts_codec_stages_resolve_none_to_the_platform() -> None:
+    """The preprocessing and vocoder stages share one resolver, and it used to
+    hard-code ``f"cuda:{gpu_id}"``. Those two stages already defaulted device to
+    None, so their signatures read as platform-neutral while the CUDA literal hid
+    one call down — a shape that a signature-level audit misses entirely.
+    """
+    from sglang_omni.models.moss_tts.stages import _resolve_codec_device
+    from sglang_omni.utils.device import resolve_device_spec
+
+    # Placement left open: the platform names the device type.
+    assert _resolve_codec_device(None, 0) == resolve_device_spec(None, 0)
+    assert _resolve_codec_device(None, None) == resolve_device_spec(None, None)
+    # An explicit device is honored as-is, on any host.
+    assert _resolve_codec_device("cuda:1", 0) == "cuda:1"
+    assert _resolve_codec_device("cpu", 3) == "cpu"
+
+
+def test_qwen3_asr_encoder_graph_follows_the_platform() -> None:
+    """The factory signature defaults this to True and the config used to leave it
+    alone, so a platform without graphs reached torch.cuda.CUDAGraph inside
+    capture_all(). encoder_cuda_graph.py guards only for ROCm, not for CPU.
+    """
+    from sglang_omni.models.qwen3_asr.config import Qwen3ASRPipelineConfig
+
+    config = Qwen3ASRPipelineConfig(model_path="unused")
+    factory = config.stage_named("asr").factory
+
+    assert (
+        factory.enable_encoder_cuda_graph
+        is platforms.current_platform.supports_cuda_graph()
+    )
+
+
+def test_whisper_asr_encoder_graph_follows_the_platform() -> None:
+    """The encoder graph is a second capture site, separate from the generation
+    graph the engine builder owns. Pinning it True would fail inside capture on a
+    platform that has no graphs rather than at configuration time.
+    """
+    from sglang_omni.models.whisper_asr.config import WhisperASRPipelineConfig
+
+    config = WhisperASRPipelineConfig(model_path="unused")
+    factory = config.stage_named("asr").factory
+
+    assert (
+        factory.enable_encoder_cuda_graph
+        is platforms.current_platform.supports_cuda_graph()
+    )
