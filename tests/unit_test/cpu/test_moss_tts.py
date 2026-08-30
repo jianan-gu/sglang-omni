@@ -15,9 +15,7 @@ def test_moss_tts_codec_device_resolves_to_cpu(
 ) -> None:
     from sglang_omni.models.moss_tts.stages import _resolve_codec_device
 
-    monkeypatch.setattr(
-        platforms.current_platform, "device_type", "cpu", raising=False
-    )
+    monkeypatch.setattr(platforms.current_platform, "device_type", "cpu", raising=False)
 
     assert _resolve_codec_device(None, 0) == "cpu"
     assert _resolve_codec_device(None, None) == "cpu"
