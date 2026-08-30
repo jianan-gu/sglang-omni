@@ -1,0 +1,17 @@
+config_cls: MossTTSPipelineConfig
+model_path: OpenMOSS-Team/MOSS-TTS-v1.5
+
+# Correctness-first Intel XPU baseline. CUDA Graph and packed FlashAttention
+# remain available to CUDA profiles; XPU uses eager generation and SDPA.
+stages:
+  preprocessing:
+    factory:
+      attention_backend: sdpa
+
+  tts_engine:
+    engine:
+      disable_cuda_graph: true
+
+  vocoder:
+    factory:
+      attention_backend: sdpa

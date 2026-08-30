@@ -47,6 +47,22 @@ components it uses instead of loading a complete codec copy.
 The bounded 24 GB and 32 GB configurations explicitly move preprocessing to
 CPU. They retain BF16 compute unless `compute_dtype` is overridden.
 
+### Intel XPU baseline
+
+Use the correctness-first XPU profile when serving on Intel GPUs:
+
+```bash
+sgl-omni serve \
+  --model-path OpenMOSS-Team/MOSS-TTS-v1.5 \
+  --config examples/configs/moss_tts_xpu.yaml \
+  --port 8000
+```
+
+This profile uses SDPA for the audio encoder and vocoder and disables CUDA
+Graph capture for the autoregressive engine. Device placement is resolved from
+the active XPU platform, so the CUDA profiles and their optimized kernels are
+unchanged.
+
 For the bounded 32 GB qualification layout, use:
 
 ```bash

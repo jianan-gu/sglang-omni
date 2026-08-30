@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,6 +15,7 @@ import sglang_omni.models.moss_tts.vocoder as vocoder_module
 from sglang_omni.models.moss_tts.payload_types import MossTTSState
 from sglang_omni.models.moss_tts.vocoder import (
     MossTTSVocoder,
+    _autocast_if_supported,
     _copy_valid_waveforms_to_cpu,
 )
 from sglang_omni.models.moss_tts.vocoder_quantizer import (
@@ -28,6 +30,23 @@ def _make_payload(request_id: str) -> StagePayload:
         request=OmniRequest(inputs=request_id, params={}),
         data={},
     )
+
+
+def test_moss_tts_vocoder_enables_bfloat16_autocast_on_xpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, torch.dtype]] = []
+
+    def fake_autocast(*, device_type: str, dtype: torch.dtype):
+        calls.append((device_type, dtype))
+        return nullcontext()
+
+    monkeypatch.setattr(vocoder_module.torch, "autocast", fake_autocast)
+
+    with _autocast_if_supported(torch.device("xpu:0"), torch.bfloat16):
+        pass
+
+    assert calls == [("xpu", torch.bfloat16)]
 
 
 class _AlwaysPackedVocoderDecoder(nn.Module):
