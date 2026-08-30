@@ -34,7 +34,6 @@ from sglang_omni.models.moss_tts.request_builders import (
     set_moss_tts_preprocessing_context,
 )
 from sglang_omni.models.moss_tts.streaming_vocoder import MossStreamingVocoderScheduler
-from sglang_omni.utils.device import resolve_device_spec
 from sglang_omni.models.moss_tts.vocoder import MossTTSVocoder
 from sglang_omni.preprocessing.cache_key import hash_bytes
 from sglang_omni.scheduling.reference_encoder import (
@@ -43,6 +42,7 @@ from sglang_omni.scheduling.reference_encoder import (
 )
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.utils.audio import audio_fingerprint, load_audio
+from sglang_omni.utils.device import resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
