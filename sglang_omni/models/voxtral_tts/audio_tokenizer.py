@@ -393,7 +393,9 @@ class Attention(nn.Module):
         else:
             output = self._native_attention(xq, xk, xv)
 
-        output = output.view(bsz, seqlen, self.n_local_heads * self.args.head_dim)
+        # reshape (not view): the native-attention output is non-contiguous on
+        # non-CUDA backends where flash-attn is unavailable.
+        output = output.reshape(bsz, seqlen, self.n_local_heads * self.args.head_dim)
         return self.wo(output).squeeze(0)
 
 
