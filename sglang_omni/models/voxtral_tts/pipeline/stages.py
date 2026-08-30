@@ -16,6 +16,7 @@ import torch
 from sglang_omni.models.voxtral_tts.io import VoxtralTTSState
 from sglang_omni.models.voxtral_tts.pipeline.state_io import load_state, store_state
 from sglang_omni.platforms import current_platform
+from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.vocoder_base import BatchVocoderBase
@@ -169,7 +170,9 @@ def _enable_inductor_gemm_autotune() -> None:
 def create_generation_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    # None lets the shared engine builder resolve placement from the platform;
+    # an explicit device is honored as-is and never retargeted.
+    device: str | None = None,
     gpu_id: int | None = None,
     max_new_tokens: int = 4096,
     server_args_overrides: dict[str, Any] | None = None,
@@ -396,12 +399,19 @@ class _VoxtralTTSVocoder(BatchVocoderBase):
 def create_vocoder_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
 ) -> SimpleScheduler:
     checkpoint_dir = _resolve_checkpoint(model_path)
-    if gpu_id is not None:
-        device = f"cuda:{gpu_id}"
+    # Placement applies to whatever device the caller named; only an unset device
+    # is resolved from the platform. The old form overwrote the caller's device
+    # with a CUDA literal whenever placement supplied a gpu_id, so an explicit
+    # cpu stage was silently retargeted and only failed at torch.cuda.set_device.
+    device = (
+        resolve_device_spec(None, gpu_id)
+        if device is None
+        else place_device_spec(device, gpu_id)
+    )
 
     logger.info("Loading Voxtral audio tokenizer for vocoding...")
     audio_tokenizer = _load_audio_tokenizer(checkpoint_dir, {}, device)
