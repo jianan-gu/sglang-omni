@@ -38,6 +38,18 @@ _SOURCE_HINT = "MOSS-TTS Local"
 _SESSION_RESERVED_OFFLINE_SLOTS = 1
 
 
+@contextlib.contextmanager
+def _xpu_codec_autocast(codec: Any):
+    """Match the codec's BF16 compute policy on Intel XPU."""
+    device = next(codec.parameters()).device
+    compute_dtype = getattr(codec, "compute_dtype", None)
+    if device.type == "xpu" and compute_dtype in (torch.float16, torch.bfloat16):
+        with torch.autocast(device_type="xpu", dtype=compute_dtype):
+            yield
+    else:
+        yield
+
+
 class _CodecStreamSession:
     """Persistent batched ``codec.streaming()`` session with slot bookkeeping.
 
@@ -246,7 +258,8 @@ class _CodecStreamSession:
                     audio, audio_lengths = graphed
                 else:
                     self._codec._set_streaming_exec_mask(exec_mask)
-                    result = self._codec._decode_frame(codes_step, codes_lengths)
+                    with _xpu_codec_autocast(self._codec):
+                        result = self._codec._decode_frame(codes_step, codes_lengths)
                     audio, audio_lengths = result.audio, result.audio_lengths
             # One batched D2H per step. A graph replay error can surface async HERE (not in
             # decode_step), so materialization stays inside the replay guard.
@@ -261,6 +274,8 @@ class _CodecStreamSession:
                     "materialization); disabling runner, serving eager from here"
                 )
                 self._cg_runner = None
+            else:
+                logger.exception("MOSS vocoder eager decode failed")
             raise
         if self._cg_runner is not None:
             if graphed is not None:
@@ -852,13 +867,14 @@ class MossTTSLocalStreamingVocoderScheduler(
             audio_codes[:, index, :length] = codes
             padding_mask[index, :length] = True
 
-        decoded = self._codec.decode(
-            audio_codes,
-            padding_mask=padding_mask,
-            num_quantizers=n_vq,
-            return_dict=True,
-            chunk_duration=None,
-        )
+        with _xpu_codec_autocast(self._codec):
+            decoded = self._codec.decode(
+                audio_codes,
+                padding_mask=padding_mask,
+                num_quantizers=n_vq,
+                return_dict=True,
+                chunk_duration=None,
+            )
         audio = decoded.audio
         audio_lengths = decoded.audio_lengths
         if audio is None or audio_lengths is None:

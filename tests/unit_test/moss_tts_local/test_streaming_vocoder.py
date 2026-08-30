@@ -24,6 +24,7 @@ import torch
 from torch import nn
 
 from sglang_omni.models.moss_tts_local import stages
+from sglang_omni.models.moss_tts_local import streaming_vocoder as vocoder_module
 from sglang_omni.models.moss_tts_local.payload_types import MossTTSLocalState
 from sglang_omni.models.moss_tts_local.request_builders import (
     build_moss_tts_local_stream_metadata,
@@ -31,6 +32,7 @@ from sglang_omni.models.moss_tts_local.request_builders import (
 from sglang_omni.models.moss_tts_local.streaming_vocoder import (
     MossTTSLocalStreamingVocoderScheduler,
     _CodecStreamSession,
+    _xpu_codec_autocast,
 )
 from sglang_omni.pipeline.stage.stream_queue import StreamItem
 from sglang_omni.proto import OmniRequest, StagePayload
@@ -40,6 +42,30 @@ from sglang_omni.scheduling.streaming_vocoder import INITIAL_CODEC_CHUNK_FRAMES_
 N_VQ = 4
 SAMPLES_PER_FRAME = 4
 SAMPLE_RATE = 48000
+
+
+def test_xpu_codec_autocast_uses_codec_compute_dtype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, torch.dtype]] = []
+
+    @contextmanager
+    def fake_autocast(*, device_type: str, dtype: torch.dtype):
+        calls.append((device_type, dtype))
+        yield
+
+    codec = SimpleNamespace(
+        compute_dtype=torch.bfloat16,
+        parameters=lambda: iter(
+            [SimpleNamespace(device=SimpleNamespace(type="xpu"))]
+        ),
+    )
+    monkeypatch.setattr(vocoder_module.torch, "autocast", fake_autocast)
+
+    with _xpu_codec_autocast(codec):
+        pass
+
+    assert calls == [("xpu", torch.bfloat16)]
 
 
 class _FakeStreamingState:
