@@ -43,9 +43,6 @@ class XPUOmniPlatform(OmniPlatform):
         return True
 
     def cross_attention_backend(self) -> str | None:
-        # The intel_xpu backend miscomputes Whisper cross attention. SGLang exposes
-        # one backend setting for both decoder attention paths, so use the portable
-        # torch-native implementation for the whole Whisper decoder on XPU.
         return "torch_native"
 
     def get_fused_qk_norm_rope_with_cos_sin_cache(self):
