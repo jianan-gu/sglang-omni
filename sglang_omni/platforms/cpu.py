@@ -9,3 +9,6 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
 
     def supports_generation_cuda_graph(self) -> bool:
         return False
+
+    def supports_pinned_host_memory(self) -> bool:
+        return False
