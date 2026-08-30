@@ -30,7 +30,7 @@ _PREPROCESSING_MAX_CONCURRENCY = 16
 _MAX_PIPELINE_INTRAOP_THREADS = 8
 
 
-def _stages(*, codec_device: str, colocated: bool) -> list[StageConfig]:
+def _stages(*, codec_device: str | None, colocated: bool) -> list[StageConfig]:
     return [
         StageConfig(
             name="preprocessing",
@@ -129,7 +129,7 @@ class MossTTSLocalPipelineConfig(PipelineConfig):
         return frozenset({("preprocessing", "tts_engine")})
 
     stages: list[StageConfig] = Field(
-        default_factory=lambda: _stages(codec_device="cuda:0", colocated=True)
+        default_factory=lambda: _stages(codec_device=None, colocated=True)
     )
 
     # Streaming-vocoder CUDA-graph knobs, passed to the vocoder factory via
@@ -232,7 +232,7 @@ class MossTTSLocalColocatedPipelineConfig(MossTTSLocalPipelineConfig):
     """Backward-compatible alias for the default single-GPU pipeline."""
 
     stages: list[StageConfig] = Field(
-        default_factory=lambda: _stages(codec_device="cuda:0", colocated=True)
+        default_factory=lambda: _stages(codec_device=None, colocated=True)
     )
 
 
