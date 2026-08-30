@@ -118,7 +118,7 @@ class MiniMaxMusic3AcousticDecoder:
         self,
         model_path: str,
         *,
-        device: str | None = "cuda:1",
+        device: str | None = None,
         dtype: str | torch.dtype = "float32",
         dit_steps: int = DEFAULT_DIT_STEPS,
         dit_cfg_scale: float = DEFAULT_DIT_CFG_SCALE,

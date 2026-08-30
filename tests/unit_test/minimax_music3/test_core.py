@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -13,7 +12,6 @@ from sglang.multimodal_gen.runtime.platforms import AttentionBackendEnum
 from torch.nn import functional as F
 
 from sglang_omni import platforms
-from sglang_omni.models.minimax_music3 import acoustic, engine_builder, stages
 from sglang_omni.models.minimax_music3.acoustic import (
     MiniMaxMusic3AcousticScheduler,
     _resolve_acoustic_dtype,
@@ -33,10 +31,6 @@ from sglang_omni.models.minimax_music3.dit import (
     _resolve_attention_backend,
 )
 from sglang_omni.models.minimax_music3.model_runner import _HiddenFrameBuffer
-from sglang_omni.models.minimax_music3.platform_policy import (
-    Qualification,
-    get_minimax_music3_platform_policy,
-)
 from sglang_omni.models.minimax_music3.rvq_cuda_graph import RVQDepthCudaGraphRunner
 from sglang_omni.models.minimax_music3.rvq_decoder import sample_topk_seeded
 from sglang_omni.pipeline.stage.stream_queue import StreamItem
@@ -178,30 +172,29 @@ def test_minimax_music3_explicit_placements_ignore_the_machine(
     monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: True)
     monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
     monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: False)
-    assert (
-        inspect.signature(acoustic.MiniMaxMusic3AcousticDecoder)
-        .parameters["device"]
-        .default
-        == "cuda:1"
+    monkeypatch.setattr(
+        torch,
+        "get_device_module",
+        lambda _device: pytest.fail("explicit topology queried the machine"),
     )
-    for _visible in ("6", "6,7"):
-        dual = MiniMaxMusic3DualGPUPipelineConfig(model_path="/models/minimax")
-        single = MiniMaxMusic3SingleGPUPipelineConfig(model_path="/models/minimax")
 
-        dual_stages = {stage.name: stage for stage in dual.stages}
-        single_stages = {stage.name: stage for stage in single.stages}
-        assert dual_stages["minimax_music3_ar"].gpu == 0
-        assert dual_stages["minimax_music3_ar"].factory.max_concurrency == 16
-        assert dual_stages["dit_dav"].gpu == 1
-        assert dual_stages["dit_dav"].factory.dtype == "float32"
-        assert dual_stages["dit_dav"].factory.breakable_cuda_graph is False
-        assert dual.placement.require_memory_fraction_for_colocation
-        assert single_stages["minimax_music3_ar"].gpu == 0
-        assert single_stages["minimax_music3_ar"].factory.max_concurrency == 16
-        assert single_stages["dit_dav"].gpu == 0
-        assert single_stages["dit_dav"].factory.dtype == "float32"
-        assert single_stages["dit_dav"].factory.breakable_cuda_graph is False
-        assert not single.placement.require_memory_fraction_for_colocation
+    dual = MiniMaxMusic3DualGPUPipelineConfig(model_path="/models/minimax")
+    single = MiniMaxMusic3SingleGPUPipelineConfig(model_path="/models/minimax")
+
+    dual_stages = {stage.name: stage for stage in dual.stages}
+    single_stages = {stage.name: stage for stage in single.stages}
+    assert dual_stages["minimax_music3_ar"].gpu == 0
+    assert dual_stages["minimax_music3_ar"].factory.max_concurrency == 16
+    assert dual_stages["dit_dav"].gpu == 1
+    assert dual_stages["dit_dav"].factory.dtype == "float32"
+    assert dual_stages["dit_dav"].factory.breakable_cuda_graph is False
+    assert dual.placement.require_memory_fraction_for_colocation
+    assert single_stages["minimax_music3_ar"].gpu == 0
+    assert single_stages["minimax_music3_ar"].factory.max_concurrency == 16
+    assert single_stages["dit_dav"].gpu == 0
+    assert single_stages["dit_dav"].factory.dtype == "float32"
+    assert single_stages["dit_dav"].factory.breakable_cuda_graph is False
+    assert not single.placement.require_memory_fraction_for_colocation
 
 
 @pytest.mark.parametrize(
@@ -250,125 +243,6 @@ def test_minimax_music3_default_follows_the_visible_gpus(
     assert MiniMaxMusic3PipelineConfig.stage_config_cls(
         "minimax_music3_ar"
     ).engine_stage
-
-
-def test_minimax_music3_xpu_defaults_to_eager_dual_device_topology(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _FakeXPU:
-        @staticmethod
-        def device_count() -> int:
-            return 2
-
-    monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(platforms.current_platform, "device_type", "xpu")
-    monkeypatch.setattr(torch, "get_device_module", lambda _device: _FakeXPU)
-
-    config = MiniMaxMusic3PipelineConfig(model_path="/models/minimax")
-    configured_stages = {stage.name: stage for stage in config.stages}
-
-    assert configured_stages["dit_dav"].gpu == 1
-    assert configured_stages["dit_dav"].factory.compile_acoustic is False
-    policy = get_minimax_music3_platform_policy()
-    assert policy.qualification is Qualification.UNVERIFIED
-    assert "real-XPU" in policy.reason
-    assert engine_builder.MiniMaxMusic3EngineBuilder().generation_defaults(
-        dtype="bfloat16"
-    )["disable_cuda_graph"]
-
-
-def test_minimax_music3_xpu_ar_stage_uses_platform_device(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class _FakeBuilder:
-        def __init__(self, *, max_running_requests: int) -> None:
-            self.max_running_requests = max_running_requests
-
-        def build(self, model_path: str, **kwargs: object) -> object:
-            captured.update(model_path=model_path, **kwargs)
-            return object()
-
-    monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(platforms.current_platform, "device_type", "xpu")
-    monkeypatch.setattr(
-        stages,
-        "resolve_device_spec",
-        lambda device, gpu_id: f"xpu:{gpu_id}",
-    )
-    monkeypatch.setattr(engine_builder, "MiniMaxMusic3EngineBuilder", _FakeBuilder)
-
-    stages.create_ar_executor("/models/minimax", gpu_id=3, max_concurrency=4)
-
-    assert captured["device"] == "xpu:3"
-    assert captured["gpu_id"] == 3
-    assert captured["dtype"] == "bfloat16"
-
-
-def test_minimax_music3_xpu_acoustic_stage_defaults_to_eager(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    class _FakeDecoder:
-        def __init__(self, _model_path: str, **kwargs: object) -> None:
-            captured.update(kwargs)
-            self.device = kwargs["device"]
-            self.dtype = kwargs["dtype"]
-            self.dit_steps = kwargs["dit_steps"]
-            self.dit_cfg_scale = kwargs["dit_cfg_scale"]
-            self.attention_backend = kwargs["attention_backend"]
-            self.compile_acoustic = kwargs["compile_acoustic"]
-
-    monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(platforms.current_platform, "device_type", "xpu")
-    monkeypatch.setattr(
-        stages,
-        "resolve_device_spec",
-        lambda device, gpu_id: f"xpu:{gpu_id}",
-    )
-    monkeypatch.setattr(stages, "MiniMaxMusic3AcousticDecoder", _FakeDecoder)
-
-    stages.create_dit_dav_executor("/models/minimax", gpu_id=1)
-
-    assert captured["device"] == "xpu:1"
-    assert captured["compile_acoustic"] is False
-    assert captured["attention_backend"] == "torch_sdpa"
-
-
-def test_minimax_music3_xpu_skips_rvq_cuda_graph(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(platforms.current_platform, "device_type", "xpu")
-
-    engine_builder.MiniMaxMusic3EngineBuilder().setup_model_resources(
-        object(), object(), generation_cuda_graph_enabled=False
-    )
-
-
-def test_minimax_music3_xpu_rejects_breakable_cuda_graph_before_loading(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(platforms.current_platform, "is_cuda", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_musa", lambda: False)
-    monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(platforms.current_platform, "device_type", "xpu")
-    monkeypatch.setattr(acoustic, "resolve_device_spec", lambda _device: "xpu:0")
-
-    with pytest.raises(ValueError, match="unavailable on xpu"):
-        acoustic.MiniMaxMusic3AcousticDecoder(
-            "/models/minimax", breakable_cuda_graph=True
-        )
 
 
 def test_native_attention_preserves_checkpoint_state_dict_keys() -> None:

@@ -31,11 +31,6 @@ source .venv/bin/activate
 uv pip install -v -e .   # drop -e for a non-editable install
 ```
 
-For Intel GPUs, use the separate [XPU installation](../get_started/installation_xpu.md)
-instead. The XPU path starts with the correctness-oriented eager runtime: SGLang
-decode CUDA graph, the RVQ depth CUDA graph, and acoustic `torch.compile` are disabled
-by default, while the native `torch_sdpa` acoustic attention backend remains enabled.
-
 **Single GPU** (colocate both stages):
 
 ```bash
@@ -49,11 +44,6 @@ CUDA_VISIBLE_DEVICES=0,1 sgl-omni serve --model-path MiniMaxAI/MiniMax-Music3 --
 ```
 
 Default optimizations that are on without further flags: backbone decode CUDA graph, RVQ depth CUDA graph, compiled DIT blocks, compiled DAV decoder, and batched seeded sampling.
-
-Those defaults describe CUDA. On XPU the graph and compile features above remain
-future optimization targets. The eager path is an **unverified enablement baseline**
-until operator coverage, numerical quality, memory use, and lifecycle behavior pass
-on the pinned real-XPU stack.
 
 Classifier-free guidance is on in both stages and has no flag. See [Guidance](#guidance) for what it costs you, because the AR half changes how much a request occupies.
 

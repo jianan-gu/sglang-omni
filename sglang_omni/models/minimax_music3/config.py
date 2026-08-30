@@ -77,8 +77,6 @@ def _stages(*, acoustic_gpu: int) -> list[StageConfig]:
                 dit_cfg_scale=DEFAULT_DIT_CFG_SCALE,
                 attention_backend="torch_sdpa",
                 cache_dit=False,
-                # Establish correctness in eager mode first. torch.compile can
-                # still be requested explicitly once an XPU stack is validated.
                 compile_acoustic=policy.acoustic_compile,
                 breakable_cuda_graph=False,
             ),
