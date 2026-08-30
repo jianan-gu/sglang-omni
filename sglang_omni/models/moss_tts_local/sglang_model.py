@@ -411,7 +411,10 @@ class MossTTSLocalSGLangModel(torch.nn.Module):
         local_hidden = self.local_transformer.step(
             hidden_states.to(dtype=self.dtype), 0
         )
-        text_logits = F.linear(local_hidden, self.local_text_lm_head.weight).float()
+        text_logits = F.linear(
+            local_hidden.to(dtype=self.local_text_lm_head.weight.dtype),
+            self.local_text_lm_head.weight,
+        ).float()
         stop_choice = self._sample_seeded_branchless(
             text_logits,
             temperature=text_temperature,
@@ -429,7 +432,7 @@ class MossTTSLocalSGLangModel(torch.nn.Module):
         current = local_hidden
         for channel in range(self.n_vq):
             head_weight = self._audio_embedding_weight(channel)
-            logits = F.linear(current, head_weight).float()
+            logits = F.linear(current.to(dtype=head_weight.dtype), head_weight).float()
             code = self._sample_seeded_branchless(
                 logits,
                 temperature=audio_temperature,
@@ -599,14 +602,17 @@ class MossTTSLocalSGLangModel(torch.nn.Module):
         local_hidden = self.local_transformer.step(
             hidden_states.to(dtype=self.dtype), 0
         )
-        text_logits = F.linear(local_hidden, self.local_text_lm_head.weight)
+        text_logits = F.linear(
+            local_hidden.to(dtype=self.local_text_lm_head.weight.dtype),
+            self.local_text_lm_head.weight,
+        )
         stop_choice = sample_text(text_logits.float())
 
         codes = []
         current = local_hidden
         for channel in range(self.n_vq):
             head_weight = self._audio_embedding_weight(channel)
-            logits = F.linear(current, head_weight)
+            logits = F.linear(current.to(dtype=head_weight.dtype), head_weight)
             code = sample_audio(logits.float(), channel)
             codes.append(code)
             if channel + 1 < self.n_vq:

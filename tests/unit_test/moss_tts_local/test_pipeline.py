@@ -24,6 +24,7 @@ from sglang_omni.models.moss_tts_local.config import (
 )
 from sglang_omni.models.moss_tts_local.local_transformer import (
     MossTTSLocalTransformer,
+    _linear_in_weight_dtype,
     _rotate_half_interleaved,
 )
 from sglang_omni.models.moss_tts_local.payload_types import (
@@ -229,6 +230,14 @@ def test_local_transformer_rejects_out_of_range_position():
 def test_rotate_half_interleaved_matches_upstream():
     x = torch.randn(5, 4, 8)
     torch.testing.assert_close(_rotate_half_interleaved(x), _hf_rotate_half(x))
+
+
+def test_local_transformer_linear_normalizes_promoted_input_dtype():
+    linear = torch.nn.Linear(8, 4).to(dtype=torch.bfloat16)
+
+    output = _linear_in_weight_dtype(linear, torch.randn(2, 8, dtype=torch.float32))
+
+    assert output.dtype is torch.bfloat16
 
 
 # MOSS-Audio-Tokenizer-v2 wrapper
