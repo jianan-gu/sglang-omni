@@ -16,8 +16,6 @@ from sglang_omni.config import (
     StageConfig,
 )
 
-from sglang_omni.platforms import current_platform
-
 _PKG = "sglang_omni.models.whisper_asr"
 
 WHISPER_MAX_INPUT_SECONDS = 30
@@ -67,17 +65,11 @@ class WhisperASRPipelineConfig(PipelineConfig):
             factory_path=f"{_PKG}.stages.create_sglang_whisper_asr_executor",
             engine=EngineArgs(max_running_requests=64),
             factory=WhisperASRFactoryArgs(
-                # Left to the factory to resolve against the live platform. A
-                # pinned device is deliberately never retargeted (see
-                # utils/device.place_device_spec), so "cuda:0" here would follow
-                # the stage onto a CPU host and only fail once SGLang reached
-                # torch.cuda.set_device.
                 device=None,
                 # The encoder CUDA-graph replay is a documented tuning knob for
                 # this pipeline; disable it when profiling eager encoder
-                # execution. Platforms that cannot capture a graph refuse it
-                # here rather than failing inside capture.
-                enable_encoder_cuda_graph=current_platform.supports_cuda_graph(),
+                # execution.
+                enable_encoder_cuda_graph=True,
                 enable_async_decode=True,
                 async_decode_min_batch_size=2,
                 request_build_max_workers=8,

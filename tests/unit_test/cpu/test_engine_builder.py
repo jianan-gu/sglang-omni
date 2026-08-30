@@ -11,27 +11,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import sglang_omni.platforms as platforms
-from sglang_omni.platforms.cpu import CPUOmniPlatform
-from sglang_omni.platforms.interface import OmniPlatform
-
-
-def test_only_cpu_refuses_generation_graph_capture():
-    """The builder asks this instead of testing the device type, so the default
-    has to stay permissive or every future platform silently loses its graphs.
-    """
-    assert OmniPlatform().supports_cuda_graph() is True
-    assert CPUOmniPlatform().supports_cuda_graph() is False
+from sglang_omni import platforms
 
 
 def _build_on(monkeypatch, device: str) -> dict[str, Any]:
-    """Run the shared builder against fakes and return the server-args kwargs."""
+    """Run the shared builder on a mocked CPU platform and return its kwargs."""
     from sglang_omni.scheduling import bootstrap, sglang_backend
     from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
 
-    monkeypatch.setattr(
-        platforms.current_platform, "device_type", "cpu", raising=False
-    )
+    monkeypatch.setattr(platforms.current_platform, "is_cpu", lambda: True)
     monkeypatch.setattr("sglang.srt.utils.get_device", lambda device_id=None: "cpu")
 
     build_kwargs: dict[str, Any] = {}
@@ -135,7 +123,7 @@ def _build_on(monkeypatch, device: str) -> dict[str, Any]:
     return build_kwargs
 
 
-def test_cpu_placement_forces_graph_capture_off(monkeypatch):
+def test_cpu_platform_forces_graph_capture_off(monkeypatch):
     """generation_defaults() asks for disable_cuda_graph=False; on CPU the
     builder's decision has to win over that stage default, not merely fill a gap.
     """
@@ -145,7 +133,7 @@ def test_cpu_placement_forces_graph_capture_off(monkeypatch):
     assert build_kwargs["device"] == "cpu"
 
 
-def test_cpu_placement_skips_the_capture_phases(monkeypatch):
+def test_cpu_platform_skips_the_capture_phases(monkeypatch):
     """Skipping capture entirely, rather than running it against a disabled
     config, is what keeps the failure at configuration time.
     """

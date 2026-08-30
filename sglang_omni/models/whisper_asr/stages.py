@@ -9,9 +9,8 @@ from typing import Any
 def create_sglang_whisper_asr_executor(
     model_path: str,
     *,
-    # None lets the engine builder resolve placement from the platform; an
-    # explicit device is honored as-is and never retargeted.
     device: str | None = None,
+    gpu_id: int | None = None,
     dtype: str = "float16",
     max_running_requests: int = 64,
     max_new_tokens: int = 256,
@@ -65,6 +64,7 @@ def create_sglang_whisper_asr_executor(
     ).build(
         model_path,
         device=device,
+        gpu_id=gpu_id,
         dtype=dtype,
         server_args_overrides=server_args_overrides,
     )

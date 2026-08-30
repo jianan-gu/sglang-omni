@@ -10,6 +10,9 @@ from sglang.srt.platforms.device_mixin import DeviceMixin
 from sglang_omni.utils.misc import normalize_quantization
 
 if TYPE_CHECKING:
+    from sglang.srt.configs.model_config import ModelConfig
+    from sglang.srt.server_args import ServerArgs
+
     from sglang_omni.comm.data_ref import TransportKind
     from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 
@@ -61,13 +64,6 @@ class OmniPlatform(DeviceMixin):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
 
-    def supports_cuda_graph(self) -> bool:
-        """Whether this platform can capture a CUDA graph at all.
-
-        Asked by shared code and by model configs instead of testing the device
-        type at each site, so a platform that cannot capture is refused at
-        configuration time rather than failing inside capture. Covers every
-        capture site — generation graphs in the engine builder, and model-local
-        ones such as Whisper's encoder graph.
-        """
-        return True
+    def cross_attention_backend(self) -> str | None:
+        """Attention backend for encoder-decoder cross attention, if required."""
+        return None

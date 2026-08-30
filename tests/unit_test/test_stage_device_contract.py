@@ -168,23 +168,8 @@ def test_whisper_asr_stage_forwards_none_to_the_shared_builder(
         engine_factory.SGLangGenerationEngineBuilder, "build", spy_build
     )
 
-    stages.create_sglang_whisper_asr_executor("unused", device=None)
+    stages.create_sglang_whisper_asr_executor("unused", device=None, gpu_id=2)
 
     assert "device" in seen, "the factory did not route through the shared builder"
     assert seen["device"] is None
-
-
-def test_whisper_asr_encoder_graph_follows_the_platform() -> None:
-    """The encoder graph is a second capture site, separate from the generation
-    graph the engine builder owns. Pinning it True would fail inside capture on a
-    platform that has no graphs rather than at configuration time.
-    """
-    from sglang_omni.models.whisper_asr.config import WhisperASRPipelineConfig
-
-    config = WhisperASRPipelineConfig(model_path="unused")
-    factory = config.stage_named("asr").factory
-
-    assert (
-        factory.enable_encoder_cuda_graph
-        is platforms.current_platform.supports_cuda_graph()
-    )
+    assert seen["gpu_id"] == 2
