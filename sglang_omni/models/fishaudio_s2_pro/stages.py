@@ -27,6 +27,7 @@ from sglang_omni.scheduling.reference_encoder import (
     TensorReferenceEncodeHook,
 )
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
+from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +306,8 @@ def create_preprocessing_executor(
 def create_sglang_tts_engine_executor(
     model_path: str,
     *,
-    device: str = "cuda",
+    device: str | None = None,
+    gpu_id: int | None = None,
     max_new_tokens: int = 2048,
     top_k: int = 30,
     ras_window: int = 16,
@@ -323,6 +325,7 @@ def create_sglang_tts_engine_executor(
     ).build(
         model_path,
         device=device,
+        gpu_id=gpu_id,
         server_args_overrides=server_args_overrides,
     )
 
@@ -343,8 +346,11 @@ def create_vocoder_executor(
         S2ProVocoderScheduler,
     )
 
-    if device is None:
-        device = f"cuda:{gpu_id}" if gpu_id is not None else "cpu"
+    device = (
+        resolve_device_spec(None, gpu_id)
+        if device is None
+        else place_device_spec(device, gpu_id)
+    )
     checkpoint_dir = _resolve_checkpoint(model_path)
     codec = _load_codec(checkpoint_dir, device)
 
