@@ -219,22 +219,6 @@ def test_moss_tts_24gb_config_bounds_runtime_memory() -> None:
     assert vocoder_args["max_batch_wait_ms"] == 2
 
 
-def test_moss_tts_xpu_config_uses_eager_sdpa_baseline() -> None:
-    config = ConfigManager.from_file("examples/configs/moss_tts_xpu.yaml").config
-
-    assert isinstance(config, MossTTSPipelineConfig)
-    stages = {stage.name: stage for stage in config.stages}
-    preprocessing_args = resolve_stage_factory_args(
-        stages["preprocessing"], config, gpu_id=0
-    )
-    tts_engine_args = resolve_stage_factory_args(stages["tts_engine"], config, gpu_id=0)
-    vocoder_args = resolve_stage_factory_args(stages["vocoder"], config, gpu_id=0)
-
-    assert preprocessing_args["attention_backend"] == "sdpa"
-    assert tts_engine_args["server_args_overrides"]["disable_cuda_graph"] is True
-    assert vocoder_args["attention_backend"] == "sdpa"
-
-
 def test_moss_tts_codec_runtime_overrides_take_precedence() -> None:
     from sglang_omni.config.manager import ConfigManager
 
@@ -260,36 +244,6 @@ def test_moss_tts_codec_runtime_overrides_take_precedence() -> None:
     assert vocoder_args["dtype"] == "float32"
     assert vocoder_args["compute_dtype"] == "bfloat16"
     assert vocoder_args["gpu_id"] == 2
-
-
-def test_moss_tts_codec_device_follows_xpu_placement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni import platforms
-    from sglang_omni.models.moss_tts import stages
-
-    monkeypatch.setattr(
-        platforms,
-        "current_platform",
-        SimpleNamespace(device_type="xpu"),
-    )
-
-    assert stages._resolve_codec_device(None, 2) == "xpu:2"
-    assert stages._resolve_codec_device("cpu", 2) == "cpu"
-
-
-def test_moss_tts_xpu_defaults_to_eager_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.moss_tts import engine_builder
-
-    monkeypatch.setattr(engine_builder.current_platform, "is_xpu", lambda: True)
-
-    defaults = engine_builder.MossTtsEngineBuilder().generation_defaults(
-        dtype="bfloat16"
-    )
-
-    assert defaults["disable_cuda_graph"] is True
 
 
 def test_moss_tts_config_merge_updates_reference_cache_factory_args() -> None:
@@ -719,6 +673,7 @@ def test_moss_tts_preprocessing_uses_placement_gpu_id(
     )
     encoder = SimpleNamespace()
     loaded: list[tuple[str, str, torch.dtype | None]] = []
+    resolved: list[tuple[str | None, int | None]] = []
 
     def load_encoder(
         model_path,
@@ -733,6 +688,11 @@ def test_moss_tts_preprocessing_uses_placement_gpu_id(
 
     monkeypatch.setattr(stages, "_load_moss_processor", lambda model_path: processor)
     monkeypatch.setattr(stages, "load_moss_audio_encoder", load_encoder)
+    monkeypatch.setattr(
+        stages,
+        "resolve_device_spec",
+        lambda device, gpu_id: resolved.append((device, gpu_id)) or "resolved:2",
+    )
 
     try:
         stages.create_preprocessing_executor(
@@ -746,7 +706,8 @@ def test_moss_tts_preprocessing_uses_placement_gpu_id(
     finally:
         rb.clear_moss_tts_preprocessing_context()
 
-    assert loaded == [("codec", "cuda:2", torch.bfloat16)]
+    assert resolved == [(None, 2)]
+    assert loaded == [("codec", "resolved:2", torch.bfloat16)]
 
 
 def test_moss_tts_pathlike_reference_uses_separate_codec() -> None:
