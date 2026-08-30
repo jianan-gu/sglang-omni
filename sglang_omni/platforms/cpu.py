@@ -7,8 +7,5 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
     def enable_code2wav_graph(self):
         return False
 
-    def supports_cuda_graph(self) -> bool:
-        return False
-
-    def supports_pinned_host_memory(self) -> bool:
+    def is_pin_memory_available(self, device=None) -> bool:
         return False

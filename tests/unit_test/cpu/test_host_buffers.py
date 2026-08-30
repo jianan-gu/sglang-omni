@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import sglang_omni.platforms as platforms
+from sglang_omni import platforms
 from sglang_omni.model_runner.base import ModelRunner
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.interface import OmniPlatform
@@ -24,8 +24,8 @@ def test_only_cpu_refuses_pinned_host_memory():
     """Default stays permissive: an accelerator platform that forgot to override
     this would otherwise lose pinned staging and quietly slow every copy.
     """
-    assert OmniPlatform().supports_pinned_host_memory() is True
-    assert CPUOmniPlatform().supports_pinned_host_memory() is False
+    assert OmniPlatform().is_pin_memory_available() is True
+    assert CPUOmniPlatform().is_pin_memory_available() is False
 
 
 def _pingpong(owner, shape=(4,), dtype=torch.int32):
@@ -38,7 +38,7 @@ def test_buffers_are_unpinned_when_the_platform_has_no_pinned_allocator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        platforms.current_platform, "supports_pinned_host_memory", lambda: False
+        platforms.current_platform, "is_pin_memory_available", lambda: False
     )
     owner = SimpleNamespace(_bufs=[], _slot=0)
 
@@ -54,7 +54,7 @@ def test_the_two_buffers_still_alternate(monkeypatch: pytest.MonkeyPatch) -> Non
     would otherwise race the next step's copy into the same buffer.
     """
     monkeypatch.setattr(
-        platforms.current_platform, "supports_pinned_host_memory", lambda: False
+        platforms.current_platform, "is_pin_memory_available", lambda: False
     )
     owner = SimpleNamespace(_bufs=[], _slot=0)
 
@@ -73,7 +73,7 @@ def test_a_pinning_platform_still_gets_pinned_buffers(
     needs a real accelerator, so assert the request rather than the result.
     """
     monkeypatch.setattr(
-        platforms.current_platform, "supports_pinned_host_memory", lambda: True
+        platforms.current_platform, "is_pin_memory_available", lambda: True
     )
     seen: dict[str, object] = {}
     real_empty = torch.empty
