@@ -42,7 +42,7 @@ def test_whisper_selects_torch_native_attention(monkeypatch) -> None:
 def test_whisper_rejects_unsafe_attention_backend() -> None:
     with pytest.raises(ValueError, match="requires attention_backend='torch_native'"):
         XPUOmniPlatform().apply_model_worker_backend_policy(
-            _server_args("intel_xpu"),
+            _server_args("triton"),
             SimpleNamespace(quantization=None),
             "WhisperForConditionalGeneration",
         )
