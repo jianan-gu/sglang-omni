@@ -53,6 +53,7 @@ dependencies = [
     "cache-dit==1.3.0",
     "imageio==2.36.0",
     "imageio-ffmpeg==0.5.1",
+    "diffusers==0.37.0",    # Required by sglang.multimodal_gen's eager pipeline imports
 
     # NOTE: sglang is intentionally NOT pinned here (see the header).
 
