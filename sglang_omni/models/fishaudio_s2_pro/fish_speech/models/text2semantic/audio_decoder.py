@@ -21,6 +21,7 @@ from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.utils 
     apply_rotary_emb,
     precompute_freqs_cis,
 )
+from sglang_omni.platforms import current_platform
 
 FISH_BATCH_INVARIANT = os.getenv("FISH_BATCH_INVARIANT", "false").lower() in (
     "true",
@@ -99,8 +100,10 @@ def _sdpa_kvcache_attention(
     if cache_position < 0:
         raise ValueError("SDPA Fast-AR attention requires cache_position")
 
-    query_length = int(q.shape[1])
-    cache_end = cache_position + query_length
+    if q.shape[1] != k.shape[1] or k.shape != v.shape:
+        raise ValueError("Fast-AR q, k, and v sequence shapes must match")
+
+    cache_end = cache_position + int(k.shape[1])
     if cache_end > int(k_cache.shape[1]):
         raise ValueError("Fast-AR attention exceeds the allocated KV cache")
     k_cache[:, cache_position:cache_end].copy_(k)
@@ -149,7 +152,7 @@ def flash_attn_kvcache_op(
     num_splits: int = 0,
     cache_position: int = -1,
 ) -> torch.Tensor:
-    if q.device.type != "cuda":
+    if current_platform.is_xpu():
         return _sdpa_kvcache_attention(
             q=q,
             k_cache=k_cache,
@@ -159,8 +162,15 @@ def flash_attn_kvcache_op(
             causal=causal,
             cache_position=cache_position,
         )
-    if q.device.index is None:
-        raise RuntimeError("FishAudio S2-Pro CUDA attention requires a device index")
+    if not current_platform.is_cuda():
+        raise RuntimeError(
+            "FishAudio S2-Pro Fast-AR attention is not qualified on "
+            f"{current_platform.device_type}"
+        )
+    if q.device.type != "cuda" or q.device.index is None:
+        raise RuntimeError(
+            "FishAudio S2-Pro CUDA attention requires an indexed CUDA tensor"
+        )
     if _fast_ar_uses_fa3(q.device.index):
         from sgl_kernel.flash_attn import flash_attn_with_kvcache
 

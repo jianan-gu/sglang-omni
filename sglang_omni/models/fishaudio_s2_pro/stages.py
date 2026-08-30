@@ -27,7 +27,7 @@ from sglang_omni.scheduling.reference_encoder import (
     TensorReferenceEncodeHook,
 )
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
-from sglang_omni.utils.device import resolve_device_spec
+from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -346,8 +346,11 @@ def create_vocoder_executor(
         S2ProVocoderScheduler,
     )
 
-    if device is None:
-        device = resolve_device_spec(None, gpu_id)
+    device = (
+        resolve_device_spec(None, gpu_id)
+        if device is None
+        else place_device_spec(device, gpu_id)
+    )
     checkpoint_dir = _resolve_checkpoint(model_path)
     codec = _load_codec(checkpoint_dir, device)
 

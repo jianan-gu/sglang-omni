@@ -31,24 +31,6 @@ sgl-omni serve \
   --port 8000
 ```
 
-### Intel XPU baseline
-
-Install the model-specific XPU extra, then use the correctness-first profile:
-
-```bash
-scripts/xpu/install_xpu.sh --extras fishaudio-s2-pro
-
-sgl-omni serve \
-  --model-path fishaudio/s2-pro \
-  --config examples/configs/s2pro_tts_xpu.yaml \
-  --port 8000
-```
-
-The Slow-AR model uses SGLang's XPU attention backend. The Fast-AR codebook
-decoder uses PyTorch SDPA with its existing KV cache, while CUDA deployments
-retain their validated FA3 or FlashInfer path. CUDA Graph and `torch.compile`
-are disabled in this XPU qualification profile.
-
 ## Synthesize Speech
 
 Plain TTS:

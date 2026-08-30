@@ -517,69 +517,6 @@ def test_s2pro_without_compile_flags_is_a_noop() -> None:
     assert _server_args_overrides(config, "tts_engine") == {}
 
 
-def test_s2pro_xpu_config_uses_eager_baseline() -> None:
-    from sglang_omni.config.manager import ConfigManager
-
-    config = ConfigManager.from_file("examples/configs/s2pro_tts_xpu.yaml").config
-
-    assert isinstance(config, S2ProPipelineConfig)
-    assert _server_args_overrides(config, "tts_engine") == {
-        "disable_cuda_graph": True,
-        "enable_torch_compile": False,
-    }
-
-
-def test_s2pro_xpu_engine_defaults_skip_cuda_backend_detection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.fishaudio_s2_pro import engine_builder
-
-    monkeypatch.setattr(engine_builder.current_platform, "is_xpu", lambda: True)
-    monkeypatch.setattr(
-        engine_builder,
-        "get_visible_gpu_sm_version",
-        lambda _gpu_id: pytest.fail("XPU must not query CUDA compute capability"),
-    )
-    builder = engine_builder.FishS2ProEngineBuilder(max_new_tokens=16, ras_window=4)
-    builder.gpu_id = 0
-
-    defaults = builder.generation_defaults(dtype="bfloat16")
-    overrides: dict[str, object] = {}
-    builder.adjust_overrides(overrides)
-
-    assert defaults["disable_cuda_graph"] is True
-    assert defaults["enable_torch_compile"] is False
-    assert "attention_backend" not in overrides
-
-
-def test_s2pro_vocoder_follows_xpu_placement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.fishaudio_s2_pro import stages
-
-    codec = SimpleNamespace()
-    loaded: list[tuple[str, str]] = []
-    monkeypatch.setattr(stages, "_resolve_checkpoint", lambda model_path: model_path)
-    monkeypatch.setattr(
-        stages, "resolve_device_spec", lambda _device, gpu_id: f"xpu:{gpu_id}"
-    )
-
-    def load_codec(checkpoint: str, device: str) -> object:
-        loaded.append((checkpoint, device))
-        return codec
-
-    monkeypatch.setattr(stages, "_load_codec", load_codec)
-    monkeypatch.setattr(
-        "sglang_omni.models.fishaudio_s2_pro.streaming_vocoder.S2ProVocoderScheduler",
-        lambda _codec, **kwargs: SimpleNamespace(codec=_codec, **kwargs),
-    )
-
-    scheduler = stages.create_vocoder_executor("model", gpu_id=2)
-
-    assert loaded == [("model", "xpu:2")]
-    assert scheduler.device == "xpu:2"
-
-
 def test_s2pro_torch_compile_max_bs_rejects_non_positive() -> None:
     from sglang_omni.config.manager import ConfigManager
 

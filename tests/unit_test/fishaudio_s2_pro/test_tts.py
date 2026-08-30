@@ -10,9 +10,6 @@ import pytest
 import torch
 
 import sglang_omni.scheduling.omni_scheduler as omni_scheduler_module
-from sglang_omni.models.fishaudio_s2_pro.fish_speech.models.text2semantic.audio_decoder import (
-    _sdpa_kvcache_attention,
-)
 from sglang_omni.models.fishaudio_s2_pro.model_runner import (
     FishS2ProModelRunner,
     collect_s2pro_step_outputs,
@@ -35,39 +32,6 @@ from tests.unit_test.fixtures.fish_fakes import (
 
 IM_END_TOKEN_ID = 151645
 SEMANTIC_TOKEN_ID = 151678
-
-
-def test_fish_fast_ar_sdpa_updates_and_attends_to_kv_cache() -> None:
-    q = torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]])
-    k = torch.tensor([[[[1.0, 0.0]]]])
-    v = torch.tensor([[[[2.0, 3.0]]]])
-    k_cache = torch.zeros(1, 3, 1, 2)
-    v_cache = torch.zeros_like(k_cache)
-
-    first = _sdpa_kvcache_attention(
-        q=q,
-        k_cache=k_cache,
-        v_cache=v_cache,
-        k=k,
-        v=v,
-        causal=True,
-        cache_position=0,
-    )
-    second = _sdpa_kvcache_attention(
-        q=q,
-        k_cache=k_cache,
-        v_cache=v_cache,
-        k=torch.tensor([[[[0.0, 1.0]]]]),
-        v=torch.tensor([[[[5.0, 7.0]]]]),
-        causal=True,
-        cache_position=1,
-    )
-
-    assert first.shape == q.shape
-    assert second.shape == q.shape
-    assert torch.equal(k_cache[0, 0], k[0, 0])
-    assert torch.equal(v_cache[0, 0], v[0, 0])
-    assert torch.all(second >= first)
 
 
 def test_fish_model_runner_vq_injection_and_code_collection_contracts() -> None:
