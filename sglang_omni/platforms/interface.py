@@ -25,6 +25,21 @@ class OmniPlatform(DeviceMixin):
         """Return per-process environment overrides needed before child startup."""
         return {}
 
+    def get_process_placement_env(
+        self,
+        process_name: str,
+        stage_specs: list[StageLaunchConfig],
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        """Return env that places a whole worker process, not one stage.
+
+        Separate from :meth:`get_stage_process_env` because the unit differs: an
+        accelerator places each stage by device index and needs nothing here,
+        while CPU can only place the process as a whole (its NUMA binding covers
+        every thread and allocation in it) and so must see all of its stages.
+        """
+        return {}
+
     def get_intra_node_transport(self) -> TransportKind:
         """Get TransportKind between devices on the same node"""
         from sglang_omni.comm.data_ref import TransportKind
