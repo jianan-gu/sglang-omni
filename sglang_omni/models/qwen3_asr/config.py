@@ -16,6 +16,7 @@ from sglang_omni.config import (
     StageConfig,
 )
 from sglang_omni.models.qwen3_asr.audio_lengths import QWEN3_ASR_MAX_INPUT_SECONDS
+from sglang_omni.platforms import current_platform
 
 _PKG = "sglang_omni.models.qwen3_asr"
 
@@ -73,6 +74,11 @@ class Qwen3ASRPipelineConfig(PipelineConfig):
                 prefill_coalesce_when_idle=True,
                 prefill_coalesce_requires_pending_builds=True,
                 prefill_coalesce_after_builds_during_decode=True,
+                # The encoder graph is captured with torch.cuda.CUDAGraph, which
+                # has no CPU equivalent; the factory default is True, so a
+                # platform without graphs has to say so here or capture_all()
+                # fails at startup.
+                enable_encoder_cuda_graph=current_platform.supports_cuda_graph(),
             ),
             engine=EngineArgs(
                 max_running_requests=64,

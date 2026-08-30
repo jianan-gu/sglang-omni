@@ -60,3 +60,24 @@ class OmniPlatform(DeviceMixin):
     def enable_code2wav_graph(self):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
+
+    def supports_pinned_host_memory(self) -> bool:
+        """Whether ``pin_memory=True`` host allocations work here.
+
+        Page-locked host buffers exist to speed host-device copies, so a
+        platform with no device has neither the allocator nor a reason to want
+        one; torch raises rather than degrading. Asked wherever a staging buffer
+        is allocated, so those sites fall back to ordinary host memory.
+        """
+        return True
+
+    def supports_cuda_graph(self) -> bool:
+        """Whether this platform can capture a CUDA graph at all.
+
+        Asked by shared code and by model configs instead of testing the device
+        type at each site, so a platform that cannot capture is refused at
+        configuration time rather than failing inside capture. Covers every
+        capture site — generation graphs in the engine builder, and model-local
+        ones such as Whisper's encoder graph.
+        """
+        return True
