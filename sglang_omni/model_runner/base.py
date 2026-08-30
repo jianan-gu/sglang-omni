@@ -168,10 +168,7 @@ class ModelRunner:
                 or bufs[0].dtype != dtype
             )
         if need_alloc:
-            # Pinning only buys faster host-device copies, so a platform without
-            # a device gets plain host memory instead — torch raises there rather
-            # than falling back on its own.
-            pin = current_platform.supports_pinned_host_memory()
+            pin = current_platform.is_pin_memory_available()
             bufs = [
                 torch.empty(shape, dtype=dtype, device="cpu", pin_memory=pin)
                 for _ in range(2)

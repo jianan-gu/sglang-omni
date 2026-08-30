@@ -61,21 +61,10 @@ class OmniPlatform(DeviceMixin):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
 
-    def supports_pinned_host_memory(self) -> bool:
-        """Whether ``pin_memory=True`` host allocations work here.
+    def is_pin_memory_available(self, device=None) -> bool:
+        """Preserve pinned staging on accelerator platforms.
 
-        Page-locked host buffers exist to speed host-device copies, so a
-        platform with no device has neither the allocator nor a reason to want
-        one; torch raises rather than degrading. Asked wherever a staging buffer
-        is allocated, so those sites fall back to ordinary host memory.
+        Concrete Omni platforms can override this capability; CPU returns
+        ``False`` because there is no accelerator transfer to optimize.
         """
-        return True
-
-    def supports_generation_cuda_graph(self) -> bool:
-        """Whether this platform can capture a generation CUDA graph.
-
-        Asked by the shared engine builder instead of testing the device type
-        there, so a platform that cannot capture is refused at configuration
-        time rather than failing inside capture.
-        """
-        return True
+        return device is None or str(device) != "cpu"

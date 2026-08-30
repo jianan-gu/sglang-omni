@@ -16,12 +16,12 @@ import torch
 from sglang_omni.models.voxtral_tts.io import VoxtralTTSState
 from sglang_omni.models.voxtral_tts.pipeline.state_io import load_state, store_state
 from sglang_omni.platforms import current_platform
-from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.scheduling.vocoder_base import BatchVocoderBase
 from sglang_omni.utils.audio_payload import audio_waveform_payload
 from sglang_omni.utils.checkpoint import resolve_checkpoint as _resolve_checkpoint
+from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -403,10 +403,8 @@ def create_vocoder_executor(
     gpu_id: int | None = None,
 ) -> SimpleScheduler:
     checkpoint_dir = _resolve_checkpoint(model_path)
-    # Placement applies to whatever device the caller named; only an unset device
-    # is resolved from the platform. The old form overwrote the caller's device
-    # with a CUDA literal whenever placement supplied a gpu_id, so an explicit
-    # cpu stage was silently retargeted and only failed at torch.cuda.set_device.
+    # Preserve an explicit device type while placement owns its index. Resolve an
+    # unset type from the current platform.
     device = (
         resolve_device_spec(None, gpu_id)
         if device is None
