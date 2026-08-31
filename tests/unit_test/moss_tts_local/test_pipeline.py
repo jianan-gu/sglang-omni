@@ -24,6 +24,7 @@ from sglang_omni.models.moss_tts_local.config import (
 )
 from sglang_omni.models.moss_tts_local.local_transformer import (
     MossTTSLocalTransformer,
+    _linear_in_weight_dtype,
     _rotate_half_interleaved,
 )
 from sglang_omni.models.moss_tts_local.payload_types import (
@@ -229,6 +230,14 @@ def test_local_transformer_rejects_out_of_range_position():
 def test_rotate_half_interleaved_matches_upstream():
     x = torch.randn(5, 4, 8)
     torch.testing.assert_close(_rotate_half_interleaved(x), _hf_rotate_half(x))
+
+
+def test_local_transformer_linear_normalizes_promoted_input_dtype():
+    linear = torch.nn.Linear(8, 4).to(dtype=torch.bfloat16)
+
+    output = _linear_in_weight_dtype(linear, torch.randn(2, 8, dtype=torch.float32))
+
+    assert output.dtype is torch.bfloat16
 
 
 # MOSS-Audio-Tokenizer-v2 wrapper
@@ -514,7 +523,7 @@ def test_pipeline_stage_wiring():
         assert "moss_tts_local" in stage.factory_path
     assert stages["preprocessing"].process == "pipeline"
     assert stages["preprocessing"].gpu == 0
-    assert stages["preprocessing"].factory.device == "cuda:0"
+    assert stages["preprocessing"].factory.device is None
     assert stages["preprocessing"].factory.max_concurrency == 16
     preprocessing_kwargs = config.stage_factory_kwargs("preprocessing")
     assert preprocessing_kwargs["ref_audio_cache"] is True
@@ -530,7 +539,7 @@ def test_pipeline_stage_wiring():
     ] == pytest.approx(0.0)
     assert stages["vocoder"].process == "vocoder"
     assert stages["vocoder"].gpu == 0
-    assert stages["vocoder"].factory.device == "cuda:0"
+    assert stages["vocoder"].factory.device is None
     assert stages["vocoder"].gpu_memory_fraction == pytest.approx(0.18)
 
     placement = build_stage_placement_plan(config)
@@ -549,12 +558,12 @@ def test_pipeline_stage_wiring():
         model_path="OpenMOSS-Team/moss-local-test"
     )
     colocated_stages = {stage.name: stage for stage in colocated.stages}
-    assert colocated_stages["preprocessing"].factory.device == "cuda:0"
+    assert colocated_stages["preprocessing"].factory.device is None
     assert (
         colocated.stage_factory_kwargs("preprocessing")["ref_audio_cache_max_items"]
         == 8192
     )
-    assert colocated_stages["vocoder"].factory.device == "cuda:0"
+    assert colocated_stages["vocoder"].factory.device is None
 
     split = MossTTSLocalSplitPipelineConfig(model_path="OpenMOSS-Team/moss-local-test")
     split_stages = {stage.name: stage for stage in split.stages}
@@ -572,6 +581,12 @@ def test_pipeline_stage_wiring():
     assert [(group.name, group.stage_names) for group in split_topology.groups] == [
         ("pipeline", ("preprocessing", "tts_engine", "vocoder"))
     ]
+
+
+def test_moss_tts_local_split_preserves_explicit_codec_device() -> None:
+    from sglang_omni.models.moss_tts_local import stages
+
+    assert stages._resolve_codec_device("cuda:1", 0) == "cuda:1"
 
 
 @pytest.mark.parametrize(

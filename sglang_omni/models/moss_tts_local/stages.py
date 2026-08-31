@@ -48,6 +48,7 @@ from sglang_omni.scheduling.reference_encoder import (
 )
 from sglang_omni.scheduling.simple_scheduler import SimpleScheduler
 from sglang_omni.utils.cpu import bounded_intraop_threads
+from sglang_omni.utils.device import place_device_spec, resolve_device_spec
 
 logger = logging.getLogger(__name__)
 
@@ -203,19 +204,12 @@ def _normalize_processor_config(processor: Any) -> None:
 
 
 def _resolve_codec_device(device: str | None, gpu_id: int | None) -> str:
-    """Pick the codec GPU for the preprocessing/vocoder stages.
-
-    The ~1B-param codec encoder costs ~0.25 GPU-seconds per reference, which
-    at concurrency 16 starves the AR engine when both share one device.
-    The default config passes an explicit ``device`` so the second-GPU codec
-    placement is visible in the pipeline config. ``gpu_id`` remains a fallback
-    for custom colocated configs and launcher-injected runtime defaults.
-    """
-    if device:
+    """Resolve platform placement while preserving an intentional indexed split."""
+    if device is None:
+        return resolve_device_spec(None, gpu_id)
+    if torch.device(device).index is not None:
         return device
-    if gpu_id is not None:
-        return f"cuda:{int(gpu_id)}"
-    return "cuda:0"
+    return place_device_spec(device, gpu_id)
 
 
 def _load_moss_tts_local_processor(model_path: str) -> Any:
@@ -611,7 +605,7 @@ def create_preprocessing_executor(
 def create_sglang_tts_engine_executor(
     model_path: str,
     *,
-    device: str = "cuda:0",
+    device: str | None = None,
     gpu_id: int | None = None,
     dtype: str = "bfloat16",
     server_args_overrides: dict[str, Any] | None = None,

@@ -8,6 +8,7 @@ from typing import Any
 
 from sglang_omni.models.moss_tts_local import request_builders
 from sglang_omni.models.moss_tts_local import stages as moss_local_stages
+from sglang_omni.platforms import current_platform
 from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
 
 
@@ -49,7 +50,7 @@ class MossTtsLocalEngineBuilder(TtsEngineBuilder):
         defaults: dict[str, Any] = {
             "max_running_requests": 16,
             "dtype": dtype,
-            "disable_cuda_graph": False,
+            "disable_cuda_graph": current_platform.is_xpu(),
             "disable_overlap_schedule": True,
             "enable_torch_compile": False,
             "max_prefill_tokens": 8192,
@@ -57,8 +58,11 @@ class MossTtsLocalEngineBuilder(TtsEngineBuilder):
             "trust_remote_code": True,
         }
         if self.total_gpu_memory_fraction is None:
+            device_module = moss_local_stages.torch.get_device_module(
+                current_platform.device_type
+            )
             defaults["mem_fraction_static"] = (
-                0.6 if moss_local_stages.torch.cuda.device_count() > 1 else 0.5
+                0.6 if device_module.device_count() > 1 else 0.5
             )
         return defaults
 

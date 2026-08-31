@@ -8,6 +8,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def _linear_in_weight_dtype(
+    linear: nn.Linear, hidden_states: torch.Tensor
+) -> torch.Tensor:
+    """Keep accelerator promotion from crossing a Linear dtype boundary."""
+    return linear(hidden_states.to(dtype=linear.weight.dtype))
+
+
 def _rotate_half_interleaved(x: torch.Tensor) -> torch.Tensor:
     """Interleaved-pair rotation: [x0, x1, x2, x3, ...] -> [-x1, x0, -x3, x2, ...]."""
     even = x[..., ::2]
@@ -22,7 +29,8 @@ class MossTTSLocalMLP(nn.Module):
         self.fc_out = nn.Linear(inner_size, hidden_size)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return self.fc_out(F.silu(self.fc_in(hidden_states)))
+        hidden_states = _linear_in_weight_dtype(self.fc_in, hidden_states)
+        return _linear_in_weight_dtype(self.fc_out, F.silu(hidden_states))
 
 
 class MossTTSLocalAttention(nn.Module):
@@ -148,7 +156,7 @@ class MossTTSLocalTransformer(nn.Module):
         x = hidden_states
         for layer_idx, block in enumerate(self.h):
             normed = block.ln_1(x)
-            qkv = block.attn.c_attn(normed)
+            qkv = _linear_in_weight_dtype(block.attn.c_attn, normed)
             query, key, value = qkv.split(self.hidden_size, dim=-1)
             query = query.view(batch_size, self.num_heads, self.head_dim)
             key = key.view(batch_size, self.num_heads, self.head_dim)
@@ -166,6 +174,6 @@ class MossTTSLocalTransformer(nn.Module):
                 value_cache[:batch_size, :, : position + 1],
             )
             attn_out = attn_out.squeeze(2).reshape(batch_size, self.hidden_size)
-            x = x + block.attn.c_proj(attn_out)
+            x = x + _linear_in_weight_dtype(block.attn.c_proj, attn_out)
             x = x + block.mlp(block.ln_2(x))
         return self.ln_f(x)
