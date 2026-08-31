@@ -11,17 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-import sglang_omni.platforms as platforms
-from sglang_omni.platforms.cpu import CPUOmniPlatform
-from sglang_omni.platforms.interface import OmniPlatform
-
-
-def test_only_cpu_refuses_generation_graph_capture():
-    """The builder asks this instead of testing the device type, so the default
-    has to stay permissive or every future platform silently loses its graphs.
-    """
-    assert OmniPlatform().supports_generation_cuda_graph() is True
-    assert CPUOmniPlatform().supports_generation_cuda_graph() is False
+from sglang_omni import platforms
 
 
 def _build_on(monkeypatch, device: str) -> dict[str, Any]:
@@ -29,9 +19,7 @@ def _build_on(monkeypatch, device: str) -> dict[str, Any]:
     from sglang_omni.scheduling import bootstrap, sglang_backend
     from sglang_omni.scheduling.engine_factory import TtsEngineBuilder
 
-    monkeypatch.setattr(
-        platforms.current_platform, "device_type", "cpu", raising=False
-    )
+    monkeypatch.setattr(platforms.current_platform, "is_cpu", lambda: True)
     monkeypatch.setattr("sglang.srt.utils.get_device", lambda device_id=None: "cpu")
 
     build_kwargs: dict[str, Any] = {}

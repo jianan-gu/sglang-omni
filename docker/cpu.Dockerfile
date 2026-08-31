@@ -8,8 +8,9 @@ SHELL ["/bin/bash", "-c"]
 ARG SGLANG_REPO=https://github.com/sgl-project/sglang.git
 ARG VER_SGLANG=v0.5.18
 
+# torchcodec loads FFmpeg's shared libraries at import time, and Omni serves
+# audio-input models, so FFmpeg and libsndfile are runtime dependencies.
 RUN apt-get update && \
-    apt-get full-upgrade -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
     ca-certificates \
     git \
@@ -26,11 +27,9 @@ RUN apt-get update && \
     libtbb-dev \
     libnuma-dev \
     numactl \
-    sox \
-    # torchcodec loads FFmpeg's shared libraries at import time, and every
-    # CPU-supported model here takes audio input, so these are not optional.
     ffmpeg \
-    libsndfile1
+    libsndfile1 && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
 
@@ -72,10 +71,6 @@ COPY . /sgl-workspace/sglang-omni
 RUN cd /sgl-workspace/sglang-omni && \
     cp pyproject_cpu.toml pyproject.toml && \
     uv pip install -e . --no-build-isolation
-
-
-RUN uv pip install --no-deps sox && \
-    uv pip install --no-deps qwen-tts==0.1.1
 
 ENV SGLANG_USE_CPU_ENGINE=1
 ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4:/usr/lib/x86_64-linux-gnu/libtbbmalloc.so:/opt/.venv/lib/libiomp5.so

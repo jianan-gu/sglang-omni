@@ -225,4 +225,4 @@ fi
 
 echo
 echo "=== done. Next: ==="
-echo "  SGLANG_USE_CPU_ENGINE=1 sgl-omni serve --model-path <path-to-qwen3-tts> --port 8000"
+echo "  SGLANG_USE_CPU_ENGINE=1 sgl-omni serve --model-path <model-path> --port 8000"

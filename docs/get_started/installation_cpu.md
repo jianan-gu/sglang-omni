@@ -4,9 +4,6 @@ Installs `sglang-omni` for **CPU-only inference**. The default
 [installation](./installation.md) targets CUDA, so this path uses the separate
 [`pyproject_cpu.toml`](../../pyproject_cpu.toml) and the PyTorch CPU wheel index.
 
-This CPU build supports **Qwen3-TTS only**. Other model families are not covered by
-this installation path.
-
 > **`--no-build-isolation` is required** for the editable `sglang-omni` install.
 
 ## Why a separate pyproject
@@ -14,7 +11,7 @@ this installation path.
 `pip install -e .` resolves [`pyproject.toml`](../../pyproject.toml). In CUDA-oriented
 checkouts, that can pull CUDA-only wheels and replace a CPU torch stack.
 [`pyproject_cpu.toml`](../../pyproject_cpu.toml) pins the torch family to CPU wheels and
-keeps the dependency set scoped to Qwen3-TTS serving.
+omits accelerator-only packages.
 
 ## Prerequisites
 
@@ -75,20 +72,6 @@ Install `sglang-omni` with the CPU pyproject:
 cd "$OMNI_DIR"
 bash scripts/cpu/install_cpu.sh
 ```
-Qwen3-TTS needs the upstream `qwen-tts` package. Option A already includes it; for
-Option B install it here, because `pyproject_cpu.toml` deliberately does not pin it.
-`--no-deps` is required on both lines: `qwen-tts` pins Transformers 4.57.3, which
-would replace this project's 5.12.1, and resolving `sox` lifts `numpy` past the
-`numba==0.65.1` ceiling. See
-[docs/cookbook/qwen3_tts.md](../cookbook/qwen3_tts.md).
-
-```bash
-sudo apt-get update
-sudo apt-get install -y sox
-
-uv pip install --no-deps sox
-uv pip install --no-deps qwen-tts==0.1.1
-```
 
 ## Verify
 
@@ -97,15 +80,9 @@ python -c "import sglang_omni, torch; print(sglang_omni.__file__, torch.__versio
 which sgl-omni
 ```
 
-The torch version should resolve to a CPU build. If you installed the optional test
-dependencies, you can also run the Qwen3-TTS unit tests:
-
-```bash
-pytest tests/unit_test/qwen3_tts -v
-```
-
-CPU-specific unit tests live in one directory, so CI (and you) can select them
-without touching the accelerator suites:
+The torch version should resolve to a CPU build. CPU-specific unit tests live in
+one directory, so CI (and you) can select them without touching the accelerator
+suites:
 
 ```bash
 SGLANG_USE_CPU_ENGINE=1 pytest tests/unit_test/cpu -v
@@ -118,69 +95,9 @@ SGLANG_USE_CPU_ENGINE=1 pytest tests/unit_test/cpu -v
 ### Audio decoding fails with `libtorchcodec_core*.so`
 
 `utils/audio.py` decodes through `torchcodec`, which loads FFmpeg's shared
-libraries at import. Two mismatches show up as the same unhelpful
-`Could not load this library` error:
+libraries at import. An unsupported FFmpeg version can surface as the unhelpful
+`Could not load this library` error.
 
-- **FFmpeg too new.** `torchcodec` ships loaders for FFmpeg majors 4–8 only;
-  FFmpeg 9 satisfies none of them. Pin an older major (`conda install -c
-  conda-forge 'ffmpeg=7.*'`). Docker users get a supported major from `apt`.
-- **conda on an older distro.** conda's FFmpeg needs a newer `libstdc++` than
-  `/lib64` provides, and the system copy wins the link order. The env already
-  ships a suitable one — put it first:
-
-  ```bash
-  LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6" python -c \
-    "from torchcodec.decoders import AudioDecoder"
-  ```
-
-## Serve Qwen3-TTS
-
-Run with the CPU engine enabled:
-
-```bash
-export SGLANG_USE_CPU_ENGINE=1
-
-sgl-omni serve \
-  --model-path Qwen/Qwen3-TTS-12Hz-0.6B-Base \
-  --config examples/configs/qwen3_tts_0_6b.yaml \
-  --host 0.0.0.0 \
-  --port 8000
-```
-
-For the 1.7B Base checkpoint, use the matching config:
-
-```bash
-export SGLANG_USE_CPU_ENGINE=1
-
-sgl-omni serve \
-  --model-path Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-  --config examples/configs/qwen3_tts_1_7b.yaml \
-  --host 0.0.0.0 \
-  --port 8000
-```
-
-Qwen3-TTS Base checkpoints require a reference voice. Pass `ref_audio` and `ref_text`,
-or the equivalent `references` array:
-
-```bash
-curl -X POST http://localhost:8000/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-    "voice": "default",
-    "input": "Hello, this is Qwen3-TTS running on CPU.",
-    "ref_audio": "/path/to/ref.wav",
-    "ref_text": "Reference transcript for the voice prompt.",
-    "language": "English",
-    "response_format": "wav",
-  }' \
-  --output output.wav
-```
-
-Health check:
-
-```bash
-curl http://localhost:8000/v1/models
-```
-
-> ✅ Support status: this CPU installation path supports **Qwen3-TTS** serving only.
+`torchcodec` ships loaders for FFmpeg majors 4–8 only; FFmpeg 9 satisfies none
+of them. Pin an older major if needed. Docker users get a supported major from
+`apt`.
