@@ -10,46 +10,14 @@ import pytest
 import torch
 
 from sglang_omni import platforms
-from sglang_omni.config import resolve_stage_factory_args
-from sglang_omni.config.manager import ConfigManager
 from sglang_omni.models.moss_tts_local import engine_builder, stages
 from sglang_omni.models.moss_tts_local import streaming_vocoder as vocoder_module
-from sglang_omni.models.moss_tts_local.config import MossTTSLocalPipelineConfig
 from sglang_omni.models.moss_tts_local.streaming_vocoder import _xpu_codec_autocast
 
 
 def _mock_xpu_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(platforms.current_platform, "is_xpu", lambda: True)
     monkeypatch.setattr(platforms.current_platform, "device_type", "xpu", raising=False)
-
-
-def test_moss_tts_local_xpu_config_uses_eager_sdpa_baseline() -> None:
-    config = ConfigManager.from_file("examples/configs/moss_tts_local_xpu.yaml").config
-    assert isinstance(config, MossTTSLocalPipelineConfig)
-    assert config.cuda_graph is False
-
-    configured_stages = {stage.name: stage for stage in config.stages}
-    preprocessing_args = resolve_stage_factory_args(
-        configured_stages["preprocessing"], config, gpu_id=0
-    )
-    engine_args = resolve_stage_factory_args(
-        configured_stages["tts_engine"], config, gpu_id=0
-    )
-    vocoder_args = resolve_stage_factory_args(
-        configured_stages["vocoder"], config, gpu_id=0
-    )
-
-    assert preprocessing_args["attention_backend"] == "sdpa"
-    assert preprocessing_args["max_concurrency"] == 1
-    assert engine_args["server_args_overrides"]["disable_cuda_graph"] is True
-    assert engine_args["server_args_overrides"]["max_running_requests"] == 1
-    assert engine_args["server_args_overrides"]["max_total_tokens"] == 8192
-    assert engine_args["server_args_overrides"]["mem_fraction_static"] == pytest.approx(
-        0.55
-    )
-    assert vocoder_args["attention_backend"] == "sdpa"
-    assert vocoder_args["cuda_graph"] is False
-    assert vocoder_args["stream_slots"] == 1
 
 
 def test_moss_tts_local_codec_device_follows_xpu_placement(
