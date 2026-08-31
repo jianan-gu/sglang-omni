@@ -8,6 +8,8 @@ Two install paths. Docker is recommended — UCX, flash-attn, sglang, and CUDA a
 
 > **Intel CPU?** Also not this page. See [Installation — Intel CPU](./installation_cpu.md), which uses [`pyproject_cpu.toml`](../../pyproject_cpu.toml) + the PyTorch CPU wheel index.
 
+> **Ascend NPU?** See [Installation — Ascend NPU](./installation_npu.md) for the supported software stack, prerequisites, and installation helper.
+
 ## 🐳 Option A: Docker (recommended)
 
 **1. Pull the image**
