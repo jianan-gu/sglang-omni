@@ -144,17 +144,30 @@ def _get_worker_process_env(spec: StageWorkerProcessSpec) -> dict[str, str]:
     exclusively. Its CUDA env remap and NCCL settings depend on being the sole
     tenant, so mixing a TP stage with any other stage in the same process group
     is a placement bug.
+
+    Two hooks contribute, because the placement unit differs by platform. The
+    per-stage hook is unchanged and still only consulted for TP stages, which is
+    all an accelerator needs — it places each stage by device index. The
+    process-level hook is asked for every process, because CPU has no device
+    index to place with (torch rejects any ``cpu:N``) and can only bind the
+    process as a whole; it defaults to ``{}`` everywhere else, so accelerator
+    behaviour is unchanged.
     """
     tp_stages = [s for s in spec.stage_specs if s.tp_size > 1]
-    if not tp_stages:
-        return {}
-    if len(tp_stages) > 1 or len(spec.stage_specs) > 1:
+    if tp_stages and (len(tp_stages) > 1 or len(spec.stage_specs) > 1):
         raise AssertionError(
             f"Process {spec.process_name!r} mixes a TP stage with other "
             "stages; TP stages must own their OS process exclusively. "
             f"stage_specs={[s.stage_name for s in spec.stage_specs]}"
         )
-    return current_platform.get_stage_process_env(tp_stages[0])
+
+    stage_env = (
+        current_platform.get_stage_process_env(tp_stages[0]) if tp_stages else {}
+    )
+    placement_env = current_platform.get_process_placement_env(
+        spec.process_name, list(spec.stage_specs)
+    )
+    return {**stage_env, **placement_env}
 
 
 @contextmanager
