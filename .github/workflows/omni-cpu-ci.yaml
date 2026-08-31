@@ -170,6 +170,8 @@ jobs:
     name: cpu-ci (unit_test/cpu)
     needs: [check-changes, preflight]
     if: ${{ needs.check-changes.outputs.run == 'true' && needs.preflight.result == 'success' }}
+    strategy:
+      fail-fast: true
     runs-on: [self-hosted, intel-omni-spr]
     timeout-minutes: 90
     env:
