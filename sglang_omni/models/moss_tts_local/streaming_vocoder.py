@@ -24,6 +24,7 @@ from sglang_omni.models.moss_tts.attention import (
 )
 from sglang_omni.models.moss_tts.audio_tokenizer import MossAudioTokenizerVocoderDecoder
 from sglang_omni.models.moss_tts_local.payload_types import MossTTSLocalState
+from sglang_omni.platforms import current_platform
 from sglang_omni.proto import StagePayload
 from sglang_omni.scheduling.pipeline_state import build_usage
 from sglang_omni.scheduling.streaming_vocoder import (
@@ -43,8 +44,12 @@ def _xpu_codec_autocast(codec: Any):
     """Match the codec's BF16 compute policy on Intel XPU."""
     device = next(codec.parameters()).device
     compute_dtype = getattr(codec, "compute_dtype", None)
-    if device.type == "xpu" and compute_dtype in (torch.float16, torch.bfloat16):
-        with torch.autocast(device_type="xpu", dtype=compute_dtype):
+    if (
+        current_platform.is_xpu()
+        and device.type == current_platform.device_type
+        and compute_dtype in (torch.float16, torch.bfloat16)
+    ):
+        with torch.autocast(device_type=current_platform.device_type, dtype=compute_dtype):
             yield
     else:
         yield
@@ -274,8 +279,6 @@ class _CodecStreamSession:
                     "materialization); disabling runner, serving eager from here"
                 )
                 self._cg_runner = None
-            else:
-                logger.exception("MOSS vocoder eager decode failed")
             raise
         if self._cg_runner is not None:
             if graphed is not None:

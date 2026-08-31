@@ -58,8 +58,11 @@ class MossTtsLocalEngineBuilder(TtsEngineBuilder):
             "trust_remote_code": True,
         }
         if self.total_gpu_memory_fraction is None:
+            device_module = moss_local_stages.torch.get_device_module(
+                current_platform.device_type
+            )
             defaults["mem_fraction_static"] = (
-                0.6 if moss_local_stages.torch.cuda.device_count() > 1 else 0.5
+                0.6 if device_module.device_count() > 1 else 0.5
             )
         return defaults
 

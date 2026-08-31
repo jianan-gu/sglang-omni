@@ -583,48 +583,10 @@ def test_pipeline_stage_wiring():
     ]
 
 
-def test_moss_tts_local_xpu_config_uses_eager_sdpa_baseline() -> None:
-    from sglang_omni.config import resolve_stage_factory_args
-    from sglang_omni.config.manager import ConfigManager
-
-    config = ConfigManager.from_file("examples/configs/moss_tts_local_xpu.yaml").config
-    assert isinstance(config, MossTTSLocalPipelineConfig)
-    assert config.cuda_graph is False
-
-    stages = {stage.name: stage for stage in config.stages}
-    preprocessing_args = resolve_stage_factory_args(
-        stages["preprocessing"], config, gpu_id=0
-    )
-    engine_args = resolve_stage_factory_args(stages["tts_engine"], config, gpu_id=0)
-    vocoder_args = resolve_stage_factory_args(stages["vocoder"], config, gpu_id=0)
-
-    assert preprocessing_args["attention_backend"] == "sdpa"
-    assert preprocessing_args["max_concurrency"] == 1
-    assert engine_args["server_args_overrides"]["disable_cuda_graph"] is True
-    assert engine_args["server_args_overrides"]["max_running_requests"] == 1
-    assert engine_args["server_args_overrides"]["max_total_tokens"] == 8192
-    assert engine_args["server_args_overrides"]["mem_fraction_static"] == pytest.approx(
-        0.55
-    )
-    assert vocoder_args["attention_backend"] == "sdpa"
-    assert vocoder_args["cuda_graph"] is False
-    assert vocoder_args["stream_slots"] == 1
-
-
-def test_moss_tts_local_codec_device_follows_xpu_placement(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni import platforms
+def test_moss_tts_local_split_preserves_explicit_codec_device() -> None:
     from sglang_omni.models.moss_tts_local import stages
 
-    monkeypatch.setattr(
-        platforms,
-        "current_platform",
-        types.SimpleNamespace(device_type="xpu"),
-    )
-
-    assert stages._resolve_codec_device(None, 2) == "xpu:2"
-    assert stages._resolve_codec_device("cpu", 2) == "cpu"
+    assert stages._resolve_codec_device("cuda:1", 0) == "cuda:1"
 
 
 @pytest.mark.parametrize(
@@ -969,25 +931,6 @@ def test_colocated_moss_ar_abort_callback_requires_model(monkeypatch):
 
     assert cleanup_calls == ["req-1"]
     assert reset_calls == ["req-1"]
-
-
-def test_moss_tts_local_xpu_defaults_to_eager_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from sglang_omni.models.moss_tts_local import engine_builder
-
-    monkeypatch.setattr(engine_builder.current_platform, "is_xpu", lambda: True)
-    builder = engine_builder.MossTtsLocalEngineBuilder(
-        enable_async_decode=False,
-        async_decode_min_batch_size=2,
-        total_gpu_memory_fraction=0.67,
-        codec_mem_reserve=0.0,
-    )
-
-    defaults = builder.generation_defaults(dtype="bfloat16")
-
-    assert defaults["disable_cuda_graph"] is True
-    assert defaults["sampling_backend"] == "pytorch"
 
 
 def test_colocated_moss_ar_factory_accepts_explicit_effective_budget():

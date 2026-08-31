@@ -40,23 +40,6 @@ sgl-omni serve \
 
 A matching config file is available at `examples/configs/moss_tts_local.yaml`.
 
-### Intel XPU
-
-Use the correctness-first XPU profile to keep the SGLang backbone and the
-frame-local decoder eager, and to select PyTorch SDPA for both codec instances:
-
-```bash
-sgl-omni serve \
-  --config examples/configs/moss_tts_local_xpu.yaml \
-  --model-path OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5 \
-  --port 8000
-```
-
-The XPU profile starts with one request, one preprocessing worker, and one
-streaming-vocoder slot. Raise those limits only after measuring device-memory
-headroom. CUDA configurations retain their existing backbone, frame-decode,
-and streaming-vocoder CUDA Graph paths.
-
 ## Synthesizing Speech
 
 ### Basic Speech

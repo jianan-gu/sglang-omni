@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import torch
@@ -17,8 +16,6 @@ from sglang_omni.models.moss_tts_local.request_builders import (
 from sglang_omni.models.moss_tts_local.state_pool import MossTTSLocalDecodeJournal
 from sglang_omni.scheduling.messages import OutgoingMessage
 from sglang_omni.scheduling.types import RequestOutput
-
-logger = logging.getLogger(__name__)
 
 
 class MossTTSLocalModelRunner(ModelRunner):
@@ -259,11 +256,7 @@ class MossTTSLocalModelRunner(ModelRunner):
     ) -> None:
         if not requests:
             return
-        try:
-            rows, end_id = self._run_frame_decode(result, forward_batch, requests)
-        except Exception:
-            logger.exception("MOSS-TTS Local frame decode failed")
-            raise
+        rows, end_id = self._run_frame_decode(result, forward_batch, requests)
         # Radix key is a capture-safe GPU hash: a device op, no host sync.
         next_text = rows[:, 0]
         next_token_ids = self._row_radix_token_ids(rows, next_text, end_id)
@@ -474,11 +467,7 @@ class MossTTSLocalModelRunner(ModelRunner):
         """
         if not requests:
             return None
-        try:
-            rows, end_id = self._run_frame_decode(result, forward_batch, requests)
-        except Exception:
-            logger.exception("MOSS-TTS Local async frame decode failed")
-            raise
+        rows, end_id = self._run_frame_decode(result, forward_batch, requests)
         next_token_ids = self._row_radix_token_ids(rows, rows[:, 0], end_id)
         result.next_token_ids = next_token_ids
         return next_token_ids.clone()
