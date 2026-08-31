@@ -144,6 +144,69 @@ def test_cpu_placement_skips_the_capture_phases(monkeypatch):
     assert "compile_model" in build_kwargs["_events"]
 
 
+def test_graph_disabled_infrastructure_still_initializes_the_eager_runner(
+    monkeypatch,
+):
+    """SGLang installs its eager runner from init_cuda_graphs(), even when graph
+    capture is disabled. CPU must initialize that eager path during infrastructure
+    construction without requesting a deferred capture from the builder.
+    """
+    from sglang_omni.model_runner import model_worker as model_worker_mod
+    from sglang_omni.scheduling import bootstrap, sglang_backend
+
+    events: list[str] = []
+
+    class FakeContext:
+        def is_config_namespace_published(self, namespace: str) -> bool:
+            assert namespace == "model"
+            return False
+
+    class FakeRunner:
+        def alloc_memory_pool(self) -> None:
+            events.append("alloc_memory_pool")
+
+        def init_attention_backends(self) -> None:
+            events.append("init_attention_backends")
+
+        def init_cuda_graphs(self) -> None:
+            events.append("init_eager_runner")
+
+    class FakeWorker:
+        enable_prefill_input_embeds = False
+        model_config = SimpleNamespace(is_multimodal=False)
+
+        def __init__(self) -> None:
+            self.model_runner = FakeRunner()
+
+        def get_memory_pool(self):
+            return "req", "kv"
+
+    monkeypatch.setattr("sglang.srt.runtime_context.get_context", lambda: FakeContext())
+    monkeypatch.setattr(
+        bootstrap,
+        "_describe_sglang_runtime_configuration",
+        lambda server_args, gpu_id: "CPU test runtime",
+    )
+    monkeypatch.setattr(model_worker_mod, "ModelWorker", lambda **kwargs: FakeWorker())
+    monkeypatch.setattr(model_worker_mod, "ModelWorkerConfig", lambda **kwargs: kwargs)
+    monkeypatch.setattr(sglang_backend, "create_tree_cache", lambda *args: "tree")
+
+    want_cuda_graph, infrastructure = (
+        bootstrap.create_sglang_infrastructure_defer_cuda_graph(
+            SimpleNamespace(disable_cuda_graph=True, page_size=1),
+            gpu_id=0,
+        )
+    )
+
+    assert want_cuda_graph is False
+    assert events == [
+        "alloc_memory_pool",
+        "init_attention_backends",
+        "init_eager_runner",
+    ]
+    assert infrastructure[1:4] == ("tree", "req", "kv")
+
+
 def test_a_cpu_stage_drops_its_placement_index(monkeypatch):
     """gpu_id=2 is handed in, but a CPU device carries no index, so the builder
     must fall back to 0 rather than build 'cpu:2'.

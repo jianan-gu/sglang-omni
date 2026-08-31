@@ -75,9 +75,9 @@ PY
 # with build isolation, pip spins up an isolated build env whose fallback
 # setuptools emits a legacy in-tree egg-info instead of a PEP 660 editable .pth
 # — the package then isn't importable outside the repo and no sgl-omni console
-# script is created. Without isolation it uses this env's setuptools, so an
-# editable install needs PEP 660 support (setuptools>=64) here; check up front
-# rather than silently producing the legacy layout.
+# script is created. Without isolation it uses this env's setuptools, which
+# must support PEP 660 and be new enough for the PEP 639 metadata; check both
+# requirements up front rather than silently producing the legacy layout.
 "${PYBIN}" - <<'PY' || exit 1
 import sys
 
@@ -106,6 +106,7 @@ INSTALL_CMD="${PYBIN} -m pip install ${EDITABLE} ${TARGET} ${NOISO} \
 --index-url ${CPU_INDEX} --extra-index-url https://pypi.org/simple"
 
 BACKUP="${REPO_ROOT}/.pyproject.cpu.bak"
+BACKUP_TMP="${BACKUP}.tmp"
 
 # Serialize the whole backup/swap/restore section.
 LOCK="${REPO_ROOT}/.pyproject.cpu.lock"
@@ -140,6 +141,11 @@ if [[ -e "${BACKUP}" ]]; then
   exit 1
 fi
 
+# A SIGKILL during the staging copy can leave this file behind, but the active
+# manifest is still untouched until the atomic rename below. The lock makes it
+# safe for the next run to discard that incomplete staging file.
+rm -f "${BACKUP_TMP}"
+
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
   echo
   echo "[--check] would run:"
@@ -152,6 +158,8 @@ fi
 
 # Restore the original pyproject.toml no matter how we exit.
 restore() {
+  rm -f "${BACKUP_TMP}"
+
   if [[ -f "${BACKUP}" ]]; then
     cp -f "${BACKUP}" "${PYPROJECT}"
     rm -f "${BACKUP}"
@@ -164,9 +172,14 @@ restore() {
     2>/dev/null || true
 }
 
-trap restore EXIT INT TERM
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-cp -f "${PYPROJECT}" "${BACKUP}"
+# Stage the backup separately so an interrupted copy can never become the
+# authoritative backup used by restore(). The same-directory rename is atomic.
+cp -f "${PYPROJECT}" "${BACKUP_TMP}"
+mv -f "${BACKUP_TMP}" "${BACKUP}"
 cp -f "${PYPROJECT_CPU}" "${PYPROJECT}"
 
 echo "swapped in pyproject_cpu.toml"

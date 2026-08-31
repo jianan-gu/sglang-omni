@@ -25,6 +25,7 @@ omits accelerator-only packages.
 ```bash Command
 # Clone the SGLang-omni repository
 git clone https://github.com/sgl-project/sglang-omni.git
+cd sglang-omni
 
 # Build the docker image
 docker build -f docker/cpu.Dockerfile -t sglang-omni:cpu .

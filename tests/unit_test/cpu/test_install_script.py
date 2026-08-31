@@ -10,6 +10,7 @@ that backup, losing the original for good.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -42,6 +43,31 @@ def _run(repo: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _write_signal_python(repo: Path) -> Path:
+    """Return a fake interpreter that terminates its installer parent."""
+    python = repo / "signal-python"
+    python.write_text(
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == "-c" ]]; then
+  echo "$0"
+  exit 0
+fi
+if [[ "${1:-}" == "-" ]]; then
+  cat >/dev/null
+  exit 0
+fi
+if [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then
+  kill -TERM "$PPID"
+  sleep 1
+  exit 0
+fi
+exit 0
+"""
+    )
+    python.chmod(0o755)
+    return python
+
+
 def test_rerun_after_an_interrupted_swap_preserves_the_original(repo: Path) -> None:
     """Reproduce the kill: swapped manifest in place, original only in the backup."""
     backup = repo / ".pyproject.cpu.bak"
@@ -70,6 +96,18 @@ def test_a_clean_tree_still_runs(repo: Path) -> None:
     assert (repo / "pyproject.toml").read_text().startswith(_ORIGINAL_MARKER)
 
 
+def test_a_partial_staging_backup_is_discarded(repo: Path) -> None:
+    """A kill during the staging copy leaves no authoritative backup to restore."""
+    staging = repo / ".pyproject.cpu.bak.tmp"
+    staging.write_text("partial backup")
+
+    result = _run(repo)
+
+    assert result.returncode == 0
+    assert not staging.exists()
+    assert _ORIGINAL_MARKER in (repo / "pyproject.toml").read_text()
+
+
 def test_a_second_run_refuses_while_the_lock_is_held(repo: Path) -> None:
     """The leftover-backup check alone is a TOCTOU guard: two runs could both pass it
     and the second would overwrite the first's backup after the swap, losing the
@@ -93,3 +131,23 @@ def test_a_second_run_refuses_while_the_lock_is_held(repo: Path) -> None:
     # The original manifest is untouched, and no backup was created.
     assert _ORIGINAL_MARKER in (repo / "pyproject.toml").read_text()
     assert not (repo / ".pyproject.cpu.bak").exists()
+
+
+def test_term_restores_the_manifest_and_exits(repo: Path) -> None:
+    """TERM during installation must restore once and stop with signal status."""
+    python = _write_signal_python(repo)
+
+    result = subprocess.run(
+        ["bash", "scripts/cpu/install_cpu.sh"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env={**os.environ, "PYTHON": str(python)},
+    )
+
+    assert result.returncode == 143
+    assert _ORIGINAL_MARKER in (repo / "pyproject.toml").read_text()
+    assert not (repo / ".pyproject.cpu.bak").exists()
+    assert not (repo / ".pyproject.cpu.bak.tmp").exists()

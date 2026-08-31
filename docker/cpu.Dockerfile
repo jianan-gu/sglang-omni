@@ -50,7 +50,8 @@ RUN uv pip install \
     scikit-build-core
 
 RUN uv pip install \
-    --default-index https://download.pytorch.org/whl/cpu \
+    --index https://download.pytorch.org/whl/cpu \
+    --default-index https://pypi.org/simple \
     "torch==2.12.0" \
     "torchvision==0.27.0" \
     "torchaudio==2.11.0"
