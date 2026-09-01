@@ -32,7 +32,26 @@ def repo(tmp_path: Path) -> Path:
     return root
 
 
+def _write_preflight_python(repo: Path) -> Path:
+    """Return a fake interpreter that makes installer preflights deterministic."""
+    python = repo / "preflight-python"
+    python.write_text(
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == "-c" ]]; then
+  echo "$0"
+fi
+if [[ "${1:-}" == "-" ]]; then
+  cat >/dev/null
+fi
+exit 0
+"""
+    )
+    python.chmod(0o755)
+    return python
+
+
 def _run(repo: Path) -> subprocess.CompletedProcess[str]:
+    python = _write_preflight_python(repo)
     return subprocess.run(
         ["bash", "scripts/cpu/install_cpu.sh", "--check"],
         cwd=repo,
@@ -40,6 +59,7 @@ def _run(repo: Path) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=120,
         check=False,  # the refusal path exits non-zero on purpose
+        env={**os.environ, "PYTHON": str(python)},
     )
 
 

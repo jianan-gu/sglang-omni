@@ -75,14 +75,31 @@ PY
 # with build isolation, pip spins up an isolated build env whose fallback
 # setuptools emits a legacy in-tree egg-info instead of a PEP 660 editable .pth
 # — the package then isn't importable outside the repo and no sgl-omni console
-# script is created. Without isolation it uses this env's setuptools, which
-# must support PEP 660 and be new enough for the PEP 639 metadata; check both
+# script is created. Without isolation it uses this env's packaging and
+# setuptools, which must support the PEP 639 metadata and PEP 660; check both
 # requirements up front rather than silently producing the legacy layout.
 "${PYBIN}" - <<'PY' || exit 1
 import sys
 
+try:
+    import packaging
+    import packaging.licenses
+    from packaging.version import Version
+except ImportError:
+    sys.exit(
+        "packaging>=24.2 is required to validate the PEP 639 license metadata. "
+        "Run: python -m pip install -U 'packaging>=24.2' 'setuptools>=77.0.0'"
+    )
+
 import setuptools
 import setuptools.build_meta
+
+if Version(packaging.__version__) < Version("24.2"):
+    sys.exit(
+        f"packaging {packaging.__version__} is too old: packaging>=24.2 is "
+        "required to validate the PEP 639 license metadata. Run: python -m pip "
+        "install -U 'packaging>=24.2' 'setuptools>=77.0.0'"
+    )
 
 version = tuple(
     int("".join(char for char in part if char.isdigit()) or 0)
@@ -93,7 +110,8 @@ if version < (77, 0):
         f"setuptools {setuptools.__version__} is too old: pyproject_cpu.toml uses "
         "the PEP 639 license fields, which 76.1 and older reject with 'invalid "
         "pyproject.toml config: `project.license`'. --no-build-isolation means pip "
-        "will not upgrade it for you, so run: pip install -U 'setuptools>=77.0.0'"
+        "will not upgrade it for you, so run: python -m pip install -U "
+        "'packaging>=24.2' 'setuptools>=77.0.0'"
     )
 if not hasattr(setuptools.build_meta, "build_editable"):
     sys.exit(

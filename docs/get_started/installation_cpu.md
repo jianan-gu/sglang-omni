@@ -48,7 +48,7 @@ OMNI_DIR="$(pwd)"
 
 uv venv .venv -p 3.12
 source .venv/bin/activate
-uv pip install --upgrade pip setuptools wheel
+uv pip install --upgrade pip "packaging>=24.2" "setuptools>=77.0.0" wheel
 ```
 
 Install the matching CPU SGLang build:
