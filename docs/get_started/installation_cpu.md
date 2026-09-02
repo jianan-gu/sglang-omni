@@ -22,7 +22,7 @@ omits accelerator-only packages.
 
 ## 🐳 Option A: Docker
 
-```bash Command
+```bash
 # Clone the SGLang-omni repository
 git clone https://github.com/sgl-project/sglang-omni.git
 cd sglang-omni
