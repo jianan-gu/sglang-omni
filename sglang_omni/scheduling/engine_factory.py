@@ -185,15 +185,12 @@ class SGLangGenerationEngineBuilder(ABC):
                     "cuda_graph_backend_prefill='breakable'"
                 )
             infra_kwargs.setdefault("enable_prefill_input_embeds", True)
-        (
-            want_cuda_graph,
-            (
-                model_worker,
-                tree_cache,
-                req_to_token_pool,
-                token_to_kv_pool_allocator,
-                model_config,
-            ),
+        want_cuda_graph, (
+            model_worker,
+            tree_cache,
+            req_to_token_pool,
+            token_to_kv_pool_allocator,
+            model_config,
         ) = scheduling_bootstrap.create_sglang_infrastructure_defer_cuda_graph(
             server_args,
             gpu_id,
