@@ -99,7 +99,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       labels: ${{ steps.pr.outputs.labels || '[]' }}
-      exact_sha: ${{ steps.meta.outputs.exact_sha }}
+      head_sha: ${{ steps.meta.outputs.head_sha }}
+      test_sha: ${{ steps.meta.outputs.test_sha }}
     steps:
       - name: Fetch latest PR gate state
         if: ${{ github.event_name == 'pull_request' }}
@@ -139,22 +140,19 @@ jobs:
           fi
 
       - name: Checkout workflow scripts
-        if: ${{ github.event_name == 'pull_request' }}
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Checkout workflow scripts for manual dispatch
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/checkout@v4
 
-      - name: Resolve exact SHA
+      - name: Resolve tested commit
         id: meta
         shell: bash
         env:
-          EXACT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TEST_SHA: ${{ github.sha }}
         run: |
-          echo "exact_sha=${EXACT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "head_sha=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "test_sha=${TEST_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "PR head SHA: ${HEAD_SHA}"
+          echo "Tested merge SHA: ${TEST_SHA}"
 
       - name: Check PR lint and mergeability
         if: ${{ github.event_name == 'pull_request' }}
@@ -184,13 +182,14 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.preflight.outputs.exact_sha }}
+          # Test the pinned PR merge commit so the checkout includes both the
+          # PR changes and the base branch version used to start this run.
+          ref: ${{ needs.preflight.outputs.test_sha }}
           fetch-depth: 0
 
       - name: Build CPU docker image
-        # Heaviest step: CPU torch wheels, sglang clone + sgl-kernel build,
-        # sglang-omni editable install. Runs the Dockerfile end-to-end so this
-        # workflow doubles as Dockerfile CI.
+        # Builds Omni on the pinned official SGLang Xeon image and runs the
+        # Dockerfile end-to-end, so this workflow also validates the CPU image.
         timeout-minutes: 60
         shell: bash
         run: |
@@ -212,13 +211,25 @@ jobs:
             "${IMAGE_TAG}" \
             sleep infinity
 
-      - name: Show CPU / torch state
+      - name: Verify CPU / torch state
         shell: bash
         run: |
-          # Best-effort: never fail the run on a probe.
           docker exec "${CONTAINER_NAME}" bash -lc '
             source /opt/.venv/bin/activate
-            python -c "import torch; print(\"torch\", torch.__version__); \
+            python -c "import os, torch; \
+                       from sglang_omni.platforms import current_platform; \
+                       is_cpu=current_platform.is_cpu(); \
+                       print(\"torch\", torch.__version__, \"cpu platform:\", is_cpu); \
+                       assert os.environ.get(\"SGLANG_USE_CPU_ENGINE\") == \"1\", \"SGLANG_USE_CPU_ENGINE must be 1\"; \
+                       assert is_cpu, \"SGLang-Omni did not resolve the CPU platform\"; \
+                       assert torch.version.cuda is None, \"expected a CPU-only PyTorch build\"; \
+                       assert not torch.cuda.is_available(), \"CUDA must not be available in CPU CI\""
+          '
+          # AMX availability is diagnostic only; CPU platform correctness does
+          # not depend on every runner exposing this optional capability.
+          docker exec "${CONTAINER_NAME}" bash -lc '
+            source /opt/.venv/bin/activate
+            python -c "import torch; \
                        amx=getattr(getattr(torch, \"cpu\", None), \"_is_amx_tile_supported\", None); \
                        print(\"amx_tile:\", amx() if amx else \"n/a\")"
           ' || true
@@ -232,7 +243,8 @@ jobs:
           # does not install; add it into the image venv before running.
           docker exec -w /sgl-workspace/sglang-omni "${CONTAINER_NAME}" bash -lc '
             source /opt/.venv/bin/activate
-            uv pip install --no-cache-dir "pytest>=7.0.0" "pytest-asyncio>=0.21.0"
+            uv pip install --index https://pypi.org/simple --no-cache-dir \
+              "pytest>=7.0.0" "pytest-asyncio>=0.21.0"
             python -m pytest tests/unit_test/cpu/ -v
           '
 
@@ -242,14 +254,15 @@ jobs:
         run: |
           set -eux
           # SIGTERM sglang before docker rm -f to drain any engine cleanly.
+          # Character classes keep pkill/pgrep from matching their own argv.
           if docker ps -a --format '{{.Names}}' | grep -qx "${CONTAINER_NAME}"; then
             docker exec "${CONTAINER_NAME}" bash -c '
-              pkill -TERM -f "sglang|run_suite|python3.*test_" 2>/dev/null || true
+              pkill -TERM -f "[s]glang|[r]un_suite|[p]ython3.*[t]est_" 2>/dev/null || true
               for _ in $(seq 1 30); do
-                pgrep -f "sglang::|sglang.launch_server" >/dev/null || break
+                pgrep -f "[s]glang::|[s]glang.launch_server" >/dev/null || break
                 sleep 1
               done
-              pkill -KILL -f "sglang|run_suite" 2>/dev/null || true
+              pkill -KILL -f "[s]glang|[r]un_suite" 2>/dev/null || true
             ' || true
           fi
           docker rm -f "${CONTAINER_NAME}" || true
