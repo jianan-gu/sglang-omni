@@ -24,8 +24,9 @@ name: CPU CI
 #
 # * cpu-ci builds docker/cpu.Dockerfile from the PR checkout, runs the CPU unit
 #   tests inside the resulting image, and removes the container + image and
-#   prunes dangling layers / build cache on completion so a long-lived
-#   self-hosted box does not accumulate multi-GB images across PRs.
+#   prunes dangling images on completion so a long-lived self-hosted box does
+#   not accumulate multi-GB images across PRs. BuildKit cache is retained to
+#   accelerate later builds.
 #
 # * pytest is installed into the image's venv at runtime rather than assumed to
 #   be baked in: pyproject_cpu.toml keeps pytest in the `eval` extra, and the
@@ -248,7 +249,7 @@ jobs:
             python -m pytest tests/unit_test/cpu/ -v
           '
 
-      - name: Cleanup container, image, and build cache
+      - name: Cleanup container and image
         if: always()
         shell: bash
         run: |
@@ -267,11 +268,9 @@ jobs:
           fi
           docker rm -f "${CONTAINER_NAME}" || true
           docker rmi -f "${IMAGE_TAG}" || true
-          # Disk GC bound: reclaim dangling images and stale build cache the
-          # per-push image left behind. Keeps recent cache to avoid a full
-          # rebuild every time.
+          # Reap dangling images left behind by interrupted runs. Keep the
+          # BuildKit cache so later CPU image builds can reuse expensive layers.
           docker image prune -f || true
-          docker builder prune -f --filter 'until=48h' || true
 
   finish:
     name: CPU CI Status
