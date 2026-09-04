@@ -78,6 +78,7 @@ tests/
     ├── models/
     │   └── test_model_capabilities.py
     ├── model_runner/
+    │   ├── test_arch_override.py
     │   ├── test_hidden_capture.py
     │   └── test_prefill_cuda_graph_usage.py
     ├── audar_tts/
@@ -165,7 +166,8 @@ tests/
     ├── arkasr/
     │   ├── test_encoder_cuda_graph.py
     │   ├── test_encoder_service.py
-    │   └── test_pipeline.py
+    │   ├── test_pipeline.py
+    │   └── test_stream_output_builder.py
     ├── moss_transcribe_diarize/
     │   ├── test_encoder_cache.py
     │   ├── test_encoder_service.py
@@ -175,7 +177,9 @@ tests/
     │   └── test_transcription_adapter.py
     ├── qwen3_tts/
     │   ├── test_pipeline.py
-    │   └── test_predictor_cuda_graph.py
+    │   ├── test_predictor_cuda_graph.py
+    │   ├── test_predictor_kernels.py
+    │   └── test_sampling_kernels.py
     ├── higgs_tts/
     │   ├── test_async_decode_runner.py
     │   ├── test_batched_step.py
@@ -200,16 +204,19 @@ tests/
     │   ├── test_stop_run_id.py
     │   └── test_views.py
     ├── serve/
+    │   ├── test_cli_audio_chunking.py
     │   ├── test_generation_batch_policy.py
     │   ├── test_generation_server_args.py
     │   ├── test_openai_api.py
     │   ├── test_speech_to_text.py
     │   ├── test_subtitles.py
+    │   ├── test_transcription_chunking.py
     │   ├── test_translation_capability.py
     │   └── test_translations.py
     ├── scheduling/
     │   ├── test_deferred_admission.py
     │   ├── test_engine_factory.py
+    │   ├── test_evict_heap_radix_cache.py
     │   ├── test_pipeline_state.py
     │   ├── test_reference_encoder.py
     │   ├── test_stage_cache.py
@@ -472,6 +479,9 @@ that happened to contain an older version of the test.
     error propagation with same-device stream checks, using CPU stand-ins
     where no GPU is present.
 - `unit_test/model_runner/`: Shared model-runner contract tests:
+  - arch override pool sizing: a sub-model engine's KV pool takes the
+    sub-model's layer count through SGLang's layer resolver (the Qwen3-Omni
+    talker at 20 layers, the thinker at 48).
   - graph-safe hidden-state capture: stable registered buffers refreshed by
     decoder-layer pre-hooks, capacity validation, graph-replay row reads, and
     buffer address stability across forwards, including real breakable CUDA
@@ -482,6 +492,9 @@ that happened to contain an older version of the test.
   - static TTS `ModelCapabilities` declarations, registry lookup, aliases, and
     launcher startup logging.
 - `unit_test/scheduling/`: Shared scheduling-service unit tests:
+  - `EvictHeapRadixCache` eviction-order equivalence against upstream
+    `RadixCache` on randomized traces, heap boundedness and recovery after a
+    full drain, and reset-then-reuse behavior.
   - deferred request admission completion, abort, and dependency-failure
     semantics.
   - breakable prefill CUDA Graph policy: backend/cap/bucket validation, shared
@@ -523,6 +536,9 @@ that happened to contain an older version of the test.
     parity check
   - audio-token count formula, audio-tower forward shape, marker-token
     suppression, and the fp16 encoder residual clamp.
+  - streaming output: request-contract validation, chunked-prefill gating,
+    rate-limited and terminal flushes, UTF-8 boundaries, per-request state,
+    and `join(deltas).strip() == done.text`.
 - `unit_test/fun_asr/`: Fun-ASR-Nano unit tests:
   - pipeline config and stage factory: single `asr` stage, `max_running_requests=64`,
     auto static KV budget, pre-LM encoder/cache defaults, scheduler-owned
