@@ -141,6 +141,7 @@ def test_tts_engine_builder_phase_order_and_override_contract(monkeypatch) -> No
     monkeypatch.setattr(
         platforms.current_platform, "device_type", "cuda", raising=False
     )
+    monkeypatch.setattr(platforms.current_platform, "is_cpu", lambda: False)
     monkeypatch.setattr(
         "sglang.srt.utils.get_device", lambda device_id=None: f"cuda:{device_id}"
     )

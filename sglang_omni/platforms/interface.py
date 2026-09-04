@@ -10,6 +10,9 @@ from sglang.srt.platforms.device_mixin import DeviceMixin
 from sglang_omni.utils.misc import normalize_quantization
 
 if TYPE_CHECKING:
+    from sglang.srt.configs.model_config import ModelConfig
+    from sglang.srt.server_args import ServerArgs
+
     from sglang_omni.comm.data_ref import TransportKind
     from sglang_omni.pipeline.stage_workers import StageLaunchConfig
 
@@ -60,6 +63,10 @@ class OmniPlatform(DeviceMixin):
     def enable_code2wav_graph(self):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
+
+    def cross_attention_backend(self) -> str | None:
+        """Attention backend for encoder-decoder cross attention, if required."""
+        return None
 
     def enable_talker_graph(self) -> bool:
         return True

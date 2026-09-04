@@ -28,6 +28,7 @@ _NONE_DEVICE_STAGES = {
     ("qwen3_omni", "audio_encoder"),
     ("qwen3_omni", "code2wav"),
     ("qwen3_omni", "image_encoder"),
+    ("whisper_asr", "asr"),
 }
 
 
@@ -142,3 +143,33 @@ def test_qwen3_asr_stage_forwards_none_to_the_shared_builder(
     # Placement injects gpu_id only when the signature declares it. Without it the
     # builder resolved a bare accelerator and told SGLang card 0.
     assert seen["gpu_id"] == 1
+
+
+def test_whisper_asr_stage_forwards_none_to_the_shared_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same contract as Qwen3-ASR, and the reason Whisper joined the list above.
+
+    The stage used to pin ``device="cuda:0"``. An explicit device is honored
+    rather than retargeted, so that literal followed the stage onto a CPU host
+    and only failed once SGLang called torch.cuda.set_device.
+    """
+    from sglang_omni.models.whisper_asr import stages
+    from sglang_omni.scheduling import engine_factory
+
+    seen: dict[str, object] = {}
+
+    def spy_build(self, model_path, **kwargs):
+        del self, model_path
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        engine_factory.SGLangGenerationEngineBuilder, "build", spy_build
+    )
+
+    stages.create_sglang_whisper_asr_executor("unused", device=None, gpu_id=2)
+
+    assert "device" in seen, "the factory did not route through the shared builder"
+    assert seen["device"] is None
+    assert seen["gpu_id"] == 2

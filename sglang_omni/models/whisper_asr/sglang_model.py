@@ -207,6 +207,7 @@ class WhisperSGLangSelfAttention(nn.Module):
         key = key.view(-1, self.num_heads, self.head_dim)
         value = value.view(-1, self.num_heads, self.head_dim)
         attn_output = self.attn(query, key, value, forward_batch)
+        attn_output = attn_output.reshape(attn_output.shape[0], -1)
         return self.out_proj(attn_output)
 
 
@@ -252,6 +253,7 @@ class WhisperSGLangCrossAttention(nn.Module):
             key = key.view(-1, self.num_heads, self.head_dim)
             value = value.view(-1, self.num_heads, self.head_dim)
         attn_output = self.attn(query, key, value, forward_batch)
+        attn_output = attn_output.reshape(attn_output.shape[0], -1)
         return self.out_proj(attn_output)
 
 
