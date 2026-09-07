@@ -19,6 +19,21 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
     def supports_generation_cuda_graph(self) -> bool:
         return False
 
+    def prepare_worker_process(self) -> None:
+        """Arm the widen-on-bind hook before SGLang can narrow the mask."""
+        cpu_numa.install_binding_hook()
+
+    def set_device(self, device) -> None:
+        """CPU has no device to select; used as the post-binding hook.
+
+        This runs in the stage worker once SGLang has already called
+        ``init_cpu_threads_env``, which is the only point where the single-core
+        mask it leaves behind can be undone. Idempotent — see
+        ``cpu_numa.widen_main_thread_to_its_node``.
+        """
+        super().set_device(device)
+        cpu_numa.widen_main_thread_to_its_node()
+
     def get_process_placement_env(
         self,
         process_name: str,

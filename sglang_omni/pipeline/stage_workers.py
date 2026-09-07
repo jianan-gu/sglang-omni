@@ -395,6 +395,7 @@ def stage_process_main(
     log = logging.getLogger(f"stage_workers.{spec.process_name}")
 
     try:
+        current_platform.prepare_worker_process()
         for stage_spec in spec.stage_specs:
             _prepare_accelerator_environment(stage_spec, log)
         apply_gpu_compat_env_defaults()
