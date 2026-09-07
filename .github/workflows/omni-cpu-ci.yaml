@@ -285,10 +285,9 @@ jobs:
           echo "check-changes: ${{ needs.check-changes.result }}"
           echo "preflight:     ${{ needs.preflight.result }}"
           echo "cpu-ci:        ${{ needs.cpu-ci.result }}"
-          # A skipped job means this PR did not touch CPU paths (or was gated
-          # out), which is a valid "nothing to do" -> success. Only a real
-          # failure or cancellation of a needed job fails the aggregate, so this
-          # job is safe to mark as a required status check.
+          # Jobs skipped because the PR did not touch CPU paths are a valid
+          # "nothing to do" -> success. Preflight gate failures and cancellations
+          # remain real failures and fail the aggregate status.
           if ${{ contains(needs.*.result, 'failure') }}; then
             echo "A required CPU CI job failed."
             exit 1
