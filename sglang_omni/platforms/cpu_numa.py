@@ -211,3 +211,160 @@ def threads_bind_env(
         len(nodes),
     )
     return {THREADS_BIND_ENV: str(nodes[node])}
+
+
+def widen_main_thread_to_its_node() -> int | None:
+    """Give this process's non-OMP threads the whole node, not just one core.
+
+    ``torch.ops.sgl_kernel.init_cpu_threads_env`` pins each OMP worker to one
+    core from inside an ``omp parallel for``. The main thread participates in
+    that team, so it executes one iteration and pins *itself* to a single core
+    too — an unintended side effect of the loop, not its purpose. Linux affinity
+    is inherited, so every thread created afterwards is stuck on that core as
+    well.
+
+    Upstream never notices: its CPU path spends essentially all of its time
+    inside OMP regions, whose workers carry their own per-core affinity and are
+    unaffected. A pipeline that also runs scheduler, transport and callback
+    threads does notice, because those inherit the single-core mask.
+
+    Restoring the mask to the node's full CPU set does not disturb the OMP
+    workers — their affinity was set per thread and is not re-derived from the
+    parent's.
+
+    Returns the number of CPUs the mask was widened to, or None when there was
+    nothing to do (already wide, no topology, or the platform forbids it).
+    """
+    try:
+        current = os.sched_getaffinity(0)
+    except (AttributeError, OSError):  # pragma: no cover - non-Linux
+        return None
+    if len(current) > 1:
+        return None  # never narrowed, or already widened
+
+    pinned = next(iter(current))
+    # Read the topology from sysfs, not from get_cpu_ids_by_node(): that helper
+    # enumerates only CPUs the *current* process can see, and by this point the
+    # process is already pinned to one core, so it would report a single-CPU
+    # node and there would be nothing to widen to.
+    for spec in _sysfs_node_cpulists():
+        cpus = _parse_cpulist(spec)
+        if pinned in cpus:
+            cpus = _drop_hyperthread_siblings(cpus)
+            try:
+                os.sched_setaffinity(0, cpus)
+            except OSError as exc:  # pragma: no cover - cgroup/permission
+                logger.warning(
+                    "Could not widen the CPU mask from core %d to its node (%s); "
+                    "threads outside OMP regions stay on that one core.",
+                    pinned,
+                    exc,
+                )
+                return None
+            logger.info(
+                "Widened the CPU mask from core %d to its %d-core NUMA node so "
+                "non-OMP threads are not confined to a single core.",
+                pinned,
+                len(cpus),
+            )
+            return len(cpus)
+    return None
+
+
+def _parse_cpulist(spec: str) -> set[int]:
+    """Parse a Linux cpulist such as ``"0-39,240-279"`` or ``"0,1,2"``."""
+    cpus: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            cpus.update(range(int(lo), int(hi) + 1))
+        else:
+            cpus.add(int(part))
+    return cpus
+
+
+def _sysfs_node_cpulists() -> list[str]:
+    """Per-node cpulists straight from sysfs, unaffected by this process's mask."""
+    import glob
+
+    specs: list[str] = []
+    for path in sorted(glob.glob("/sys/devices/system/node/node*/cpulist")):
+        try:
+            with open(path) as handle:
+                specs.append(handle.read().strip())
+        except OSError:  # pragma: no cover - depends on host sysfs
+            continue
+    return specs
+
+
+def install_binding_hook() -> bool:
+    """Widen the CPU mask the moment SGLang narrows it, not minutes later.
+
+    ``init_cpu_threads_env`` runs deep inside SGLang's bootstrap, before the
+    model is built. Everything spawned between that call and our first chance to
+    react — weight loading, worker pools, transport threads — inherits the
+    single-core mask and cannot be moved afterwards, because affinity is only
+    inherited at creation. On one Whisper run that gap was 4.5 minutes and left
+    70 threads stranded on one core.
+
+    Wrapping the op closes the gap: the mask is widened before the call returns,
+    so no thread is ever created under it. Call this in the stage worker before
+    any SGLang bootstrap runs.
+
+    Returns True if the hook was installed, False if it was already present or
+    the op is unavailable.
+    """
+    try:
+        import sglang.srt.distributed.bootstrap as bootstrap
+    except Exception as exc:  # pragma: no cover - depends on the sglang build
+        logger.debug("No SGLang CPU bootstrap to hook (%s).", exc)
+        return False
+
+    if getattr(bootstrap, "_omni_widen_hooked", False):
+        return False
+
+    original = bootstrap._init_cpu_threads_env
+
+    def _wrapped(*args, **kwargs):
+        result = original(*args, **kwargs)
+        widen_main_thread_to_its_node()
+        return result
+
+    bootstrap._init_cpu_threads_env = _wrapped
+    bootstrap._omni_widen_hooked = True
+    return True
+
+
+def _drop_hyperthread_siblings(cpus: set[int]) -> set[int]:
+    """Keep one logical CPU per physical core.
+
+    Siblings share the core's execution units, so handing both to a compute-bound
+    thread pool buys contention rather than throughput — and SGLang has already
+    sized its OMP team to the physical core count. Where sysfs does not report
+    the topology the set is returned untouched, which is the previous behaviour.
+    """
+    kept: set[int] = set()
+    seen: set[int] = set()
+    for cpu in sorted(cpus):
+        if cpu in seen:
+            continue
+        siblings = _thread_siblings(cpu)
+        if not siblings:
+            kept.add(cpu)
+            continue
+        # Deterministic pick, so every process in a run agrees on the same set.
+        kept.add(min(siblings))
+        seen.update(siblings)
+    return kept or cpus
+
+
+def _thread_siblings(cpu: int) -> set[int]:
+    path = f"/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list"
+    try:
+        with open(path) as handle:
+            return _parse_cpulist(handle.read().strip())
+    except OSError:  # pragma: no cover - depends on host sysfs
+        return set()

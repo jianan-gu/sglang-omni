@@ -43,6 +43,17 @@ class OmniPlatform(DeviceMixin):
         """
         return {}
 
+    def cross_attention_backend(self) -> str | None:
+        """Attention backend for encoder-decoder cross attention, if required."""
+        return None
+
+    def prepare_worker_process(self) -> None:
+        """Run once in a freshly spawned stage worker, before anything else.
+
+        The place for setup that must happen ahead of model construction.
+        Nothing to do on an accelerator.
+        """
+
     def get_intra_node_transport(self) -> TransportKind:
         """Get TransportKind between devices on the same node"""
         from sglang_omni.comm.data_ref import TransportKind
