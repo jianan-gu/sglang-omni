@@ -150,7 +150,7 @@ jobs:
         run: |
           echo "test_sha=${TEST_SHA}" >> "${GITHUB_OUTPUT}"
           echo "PR head SHA: ${HEAD_SHA}"
-          echo "Tested merge SHA: ${TEST_SHA}"
+          echo "Tested commit SHA: ${TEST_SHA}"
 
       - name: Check PR lint and mergeability
         if: ${{ github.event_name == 'pull_request' }}
@@ -170,17 +170,17 @@ jobs:
     timeout-minutes: 90
     env:
       DOCKER_BUILDKIT: "1"
-      # Fixed per-PR tag (no SHA): a new push overwrites the previous image so a
-      # long-lived self-hosted box does not accumulate one multi-GB image per
-      # push. Concurrency cancels in-progress runs, so no intra-PR collision.
+      # Fixed per-PR names (no SHA or attempt): a new push overwrites the
+      # previous image, and a rerun can remove a container left by an interrupted
+      # attempt. Concurrency prevents intra-PR collisions.
       IMAGE_TAG: sglang-omni-cpu-ci:pr-${{ github.event.pull_request.number || github.run_id }}
       CONTAINER_NAME: ci_omni_cpu_${{ github.event.pull_request.number || github.run_id }}
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v4
         with:
-          # Test the pinned PR merge commit so the checkout includes both the
-          # PR changes and the base branch version used to start this run.
+          # Test the pinned commit. For pull requests, this is GitHub's merge
+          # commit containing the PR changes and the base used to start the run.
           ref: ${{ needs.preflight.outputs.test_sha }}
           fetch-depth: 0
 
