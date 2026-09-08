@@ -99,8 +99,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
-      labels: ${{ steps.pr.outputs.labels || '[]' }}
-      head_sha: ${{ steps.meta.outputs.head_sha }}
       test_sha: ${{ steps.meta.outputs.test_sha }}
     steps:
       - name: Fetch latest PR gate state
@@ -150,7 +148,6 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TEST_SHA: ${{ github.sha }}
         run: |
-          echo "head_sha=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
           echo "test_sha=${TEST_SHA}" >> "${GITHUB_OUTPUT}"
           echo "PR head SHA: ${HEAD_SHA}"
           echo "Tested merge SHA: ${TEST_SHA}"
@@ -169,16 +166,15 @@ jobs:
     name: cpu-ci (unit_test/cpu)
     needs: [check-changes, preflight]
     if: ${{ needs.check-changes.outputs.run == 'true' && needs.preflight.result == 'success' }}
-    strategy:
-      fail-fast: true
     runs-on: [self-hosted, intel-omni-spr]
     timeout-minutes: 90
     env:
+      DOCKER_BUILDKIT: "1"
       # Fixed per-PR tag (no SHA): a new push overwrites the previous image so a
       # long-lived self-hosted box does not accumulate one multi-GB image per
       # push. Concurrency cancels in-progress runs, so no intra-PR collision.
       IMAGE_TAG: sglang-omni-cpu-ci:pr-${{ github.event.pull_request.number || github.run_id }}
-      CONTAINER_NAME: ci_omni_cpu_${{ github.event.pull_request.number || github.run_id }}_${{ github.run_attempt }}
+      CONTAINER_NAME: ci_omni_cpu_${{ github.event.pull_request.number || github.run_id }}
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v4
@@ -207,8 +203,6 @@ jobs:
           docker run -dt \
             --name "${CONTAINER_NAME}" \
             --ipc host \
-            --shm-size 32g \
-            -v /dev/shm:/dev/shm \
             "${IMAGE_TAG}" \
             sleep infinity
 
