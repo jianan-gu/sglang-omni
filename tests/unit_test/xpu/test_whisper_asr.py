@@ -23,11 +23,18 @@ def _builder() -> WhisperASREngineBuilder:
     )
 
 
-def _server_args(attention_backend: str) -> SimpleNamespace:
+def _server_args(
+    attention_backend: str,
+    *,
+    prefill_attention_backend: str | None = None,
+    decode_attention_backend: str | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         quantization=None,
         moe_runner_backend="auto",
         attention_backend=attention_backend,
+        prefill_attention_backend=prefill_attention_backend,
+        decode_attention_backend=decode_attention_backend,
     )
 
 
@@ -40,7 +47,7 @@ def test_whisper_selects_torch_native_attention(monkeypatch) -> None:
 
 
 def test_whisper_rejects_unsafe_attention_backend() -> None:
-    with pytest.raises(ValueError, match="requires attention_backend='torch_native'"):
+    with pytest.raises(ValueError, match="requires torch_native"):
         XPUOmniPlatform().apply_model_worker_backend_policy(
             _server_args("triton"),
             SimpleNamespace(quantization=None),
@@ -56,6 +63,22 @@ def test_whisper_accepts_torch_native_attention_backend() -> None:
     )
 
     assert effective_quantization is None
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"prefill_attention_backend": "triton"},
+        {"decode_attention_backend": "triton"},
+    ],
+)
+def test_whisper_rejects_phase_specific_attention_backend(override) -> None:
+    with pytest.raises(ValueError, match="requires torch_native"):
+        XPUOmniPlatform().apply_model_worker_backend_policy(
+            _server_args("torch_native", **override),
+            SimpleNamespace(quantization=None),
+            "WhisperForConditionalGeneration",
+        )
 
 
 @pytest.mark.parametrize("output_rank", [2, 3])
@@ -82,10 +105,6 @@ def test_whisper_decoder_attention_flattens_backend_output(
         output = attention(hidden_states, forward_batch=object())
     else:
         attention = sglang_model.WhisperSGLangCrossAttention(config, layer_id=0)
-        output = attention(
-            hidden_states,
-            torch.randn(4, config.d_model),
-            forward_batch=object(),
-        )
+        output = attention(hidden_states, forward_batch=object())
 
     assert output.shape == hidden_states.shape
