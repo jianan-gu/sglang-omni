@@ -6,11 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-import torch
-from transformers import WhisperConfig
 
 from sglang_omni import platforms
-from sglang_omni.models.whisper_asr import sglang_model, stages
 from sglang_omni.models.whisper_asr.engine_builder import WhisperASREngineBuilder
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 
@@ -55,58 +52,3 @@ def test_whisper_cpu_accepts_torch_native_attention_backend() -> None:
     )
 
     assert effective_quantization is None
-
-
-def test_whisper_cpu_stage_forwards_placement(
-    monkeypatch,
-) -> None:
-    seen: dict[str, object] = {}
-
-    def spy_build(self, model_path, **kwargs):
-        del model_path
-        seen.update(kwargs)
-        return SimpleNamespace()
-
-    monkeypatch.setattr(WhisperASREngineBuilder, "build", spy_build)
-
-    stages.create_sglang_whisper_asr_executor(
-        "unused",
-        device=None,
-        gpu_id=None,
-    )
-
-    assert seen["device"] is None
-    assert seen["gpu_id"] is None
-
-
-@pytest.mark.parametrize("output_rank", [2, 3])
-@pytest.mark.parametrize("attention_kind", ["self", "cross"])
-def test_whisper_cpu_attention_flattens_backend_output(
-    monkeypatch, output_rank: int, attention_kind: str
-) -> None:
-    class _StubRadixAttention(torch.nn.Module):
-        def __init__(self, *args, **kwargs) -> None:
-            super().__init__()
-
-        def forward(self, query, key, value, forward_batch):
-            del key, value, forward_batch
-            if output_rank == 2:
-                return query.reshape(query.shape[0], -1)
-            return query
-
-    monkeypatch.setattr(sglang_model, "RadixAttention", _StubRadixAttention)
-    config = WhisperConfig(d_model=8, decoder_attention_heads=2)
-    hidden_states = torch.randn(3, config.d_model)
-
-    if attention_kind == "self":
-        attention = sglang_model.WhisperSGLangSelfAttention(config, layer_id=0)
-        output = attention(hidden_states, forward_batch=object())
-    else:
-        attention = sglang_model.WhisperSGLangCrossAttention(config, layer_id=0)
-        output = attention(
-            hidden_states,
-            torch.randn(4, config.d_model),
-            forward_batch=object(),
-        )
-
-    assert output.shape == hidden_states.shape

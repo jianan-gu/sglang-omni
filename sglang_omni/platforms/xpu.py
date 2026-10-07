@@ -6,17 +6,22 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import torch
+from sglang.srt.arg_groups.model_override_base import resolved_view
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
-from sglang_omni.platforms.interface import OmniPlatform
+from sglang_omni.platforms.interface import JointRopeInplaceKernel, OmniPlatform
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from sglang.srt.configs.model_config import ModelConfig
     from sglang.srt.server_args import ServerArgs
+    from torch.nn.attention import SDPBackend
 
     from sglang_omni.pipeline.stage_workers import StageLaunchConfig
+    from sglang_omni.platforms.device_graph import DeviceGraphBackend
+else:
+    pass
 
 
 class XPUOmniPlatform(OmniPlatform):
@@ -32,7 +37,7 @@ class XPUOmniPlatform(OmniPlatform):
         torch.xpu.set_device(0 if index is None else index)
 
     def enable_code2wav_graph(self):
-        return False
+        return True
 
     def get_fused_qk_norm_rope_with_cos_sin_cache(self):
         try:
@@ -45,19 +50,52 @@ class XPUOmniPlatform(OmniPlatform):
             return None
         return fused_inplace_qknorm_rope
 
+    def get_joint_rope_inplace_kernel(self) -> JointRopeInplaceKernel:
+        from sgl_kernel.jit.rope import apply_rope_inplace
+
+        return apply_rope_inplace
+
     def enable_talker_graph(self) -> bool:
-        # The predictor's default SDPA dispatch is not capturable here.
-        return False
+        return True
 
     def enable_thinker_decode_graph(self) -> bool:
         # Capture leaves the scheduler thread's stream recording; host reads fail.
         return False
+
+    def enable_zonos2_torch_compile(self) -> bool:
+        return False
+
+    def supports_fp8_moe(self) -> bool:
+        return False
+
+    def zonos2_bf16_mem_fraction_static(self, device: torch.device) -> float | None:
+        if device.type != self.device_type:
+            return None
+        else:
+            # Measured on an Arc Pro B60: 14.34 GiB of bf16 experts plus a
+            # 5.98 GiB KV pool.
+            return 0.85
+
+    def _get_device_graph_backend(self) -> DeviceGraphBackend:
+        from sglang_omni.platforms.device_graph import XpuDeviceGraphBackend
+
+        return XpuDeviceGraphBackend()
 
     def get_decode_cuda_graph_backend(self) -> str | None:
         # SGLang leaves XPU decode capture opt-in and accepts only full.
         from sglang.srt.model_executor.cuda_graph_config import Backend
 
         return Backend.FULL
+
+    def get_graph_capture_sdpa_backends(self) -> tuple["SDPBackend", ...]:
+        """Efficient attention is left out: XPU reaches math before its
+        unsupported efficient branch, so naming it changes nothing."""
+        from torch.nn.attention import SDPBackend
+
+        return (SDPBackend.FLASH_ATTENTION, SDPBackend.MATH)
+
+    def supports_graph_captured_fft(self) -> bool:
+        return False
 
     def apply_model_worker_backend_policy(
         self,
@@ -69,16 +107,20 @@ class XPUOmniPlatform(OmniPlatform):
             server_args, model_config, model_arch_override
         )
 
+        cfg = resolved_view(server_args)
+        moe_runner_backend = cfg.moe_runner_backend
         if model_arch_override in (
             "Qwen3OmniTalker",
             "Qwen3OmniThinkerForCausalLM",
-        ) and server_args.moe_runner_backend in ("flashinfer_cutlass", "cutlass"):
+        ) and moe_runner_backend in ("flashinfer_cutlass", "cutlass"):
             raise ValueError(
                 f"Qwen3-Omni on Intel XPU cannot use "
-                f"moe_runner_backend={server_args.moe_runner_backend!r}; the CUTLASS "
+                f"moe_runner_backend={moe_runner_backend!r}; the CUTLASS "
                 "MoE runners are CUDA-only. Leave the backend as 'auto' or pass "
                 "'triton'."
             )
+        else:
+            pass
 
         return effective_quantization
 
@@ -90,14 +132,20 @@ class XPUOmniPlatform(OmniPlatform):
         """Keep every card visible, preserving a group-wide ZE_AFFINITY_MASK."""
         if spec.tp_size <= 1:
             return {}
+        else:
+            pass
         if spec.gpu_id is None:
             raise ValueError(f"tp stage {spec.stage_name!r} requires a GPU id")
+        else:
+            pass
 
         updates = {"SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "false"}
         source_env = env if env is not None else os.environ
         mask = (source_env.get("ZE_AFFINITY_MASK") or "").strip()
         if not mask:
             return updates
+        else:
+            pass
 
         visible = [item.strip() for item in mask.split(",") if item.strip()]
         if len(visible) < spec.tp_size:
@@ -108,10 +156,14 @@ class XPUOmniPlatform(OmniPlatform):
                 "discovery, and dropping the mask instead would relocate the stage "
                 "onto different physical cards."
             )
+        else:
+            pass
         if spec.gpu_id >= len(visible):
             raise ValueError(
                 f"tp stage {spec.stage_name!r} assigned gpu_id={spec.gpu_id}, but "
                 f"ZE_AFFINITY_MASK={mask!r} exposes only {len(visible)} cards "
                 f"({', '.join(visible)}). gpu_id indexes into the mask, not the host."
             )
+        else:
+            pass
         return updates

@@ -1,17 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pipeline configuration for Qwen3-TTS Base."""
+"""Pipeline configuration for Qwen3-TTS."""
 
 from __future__ import annotations
 
+import json
 import re
-from typing import Any, ClassVar
+from pathlib import Path
+from typing import ClassVar, TypedDict
 
 from sglang_omni.config import (
+    CustomVoiceConfig,
     EngineStageConfig,
     FactoryArgs,
     PipelineConfig,
     StageConfig,
 )
+from sglang_omni.config.runtime import (
+    resolve_stage_factory_kwargs,
+    resolve_stage_typed_kwargs,
+)
+from sglang_omni.utils.json import JsonValue
 
 _PKG = "sglang_omni.models.qwen3_tts"
 _QWEN3_TTS_CUSTOM_VARIANT_MARKERS = (
@@ -22,8 +30,17 @@ _QWEN3_TTS_CUSTOM_VARIANT_MARKERS = (
 )
 
 
+class Qwen3TTSStageFactoryKwargs(TypedDict, total=False):
+    load_frontend: bool
+    max_concurrency: int
+    server_args_overrides: dict[str, bool]
+    enable_deterministic_inference: bool
+    initial_cuda_graph: bool
+    followup_cuda_graph: bool
+
+
 class Qwen3TTSPipelineConfig(PipelineConfig):
-    """3-stage Qwen3-TTS Base pipeline: preprocessing -> engine -> vocoder."""
+    """3-stage Qwen3-TTS pipeline: preprocessing -> engine -> vocoder."""
 
     architecture: ClassVar[str] = "Qwen3TTSForConditionalGeneration"
     requires_model_capabilities: ClassVar[bool] = True
@@ -33,7 +50,7 @@ class Qwen3TTSPipelineConfig(PipelineConfig):
     }
 
     @classmethod
-    def generation_admission_defaults(cls) -> dict[str, Any]:
+    def generation_admission_defaults(cls) -> dict[str, int]:
         from sglang_omni.models.qwen3_tts.engine_builder import Qwen3TtsEngineBuilder
 
         defaults = Qwen3TtsEngineBuilder().generation_defaults(dtype="bfloat16")
@@ -55,15 +72,8 @@ class Qwen3TTSPipelineConfig(PipelineConfig):
             # split frontend passes --preprocessing.gpu with its own fraction.
             next="tts_engine",
         ),
-        EngineStageConfig(
-            name="tts_engine",
-            process="pipeline",
-            factory_path=f"{_PKG}.stages.create_sglang_tts_engine_executor",
-            factory=FactoryArgs(dtype="bfloat16"),
-            gpu=0,
-            next="vocoder",
-            stream_to=["vocoder"],
-        ),
+        # note(ratish): stages are built in list order. The vocoder comes before
+        # the engine so its weights and graphs are resident when the KV pool is sized.
         StageConfig(
             name="vocoder",
             process="pipeline",
@@ -73,43 +83,126 @@ class Qwen3TTSPipelineConfig(PipelineConfig):
             terminal=True,
             can_accept_stream_before_payload=True,
         ),
+        EngineStageConfig(
+            name="tts_engine",
+            process="pipeline",
+            factory_path=f"{_PKG}.stages.create_sglang_tts_engine_executor",
+            factory=FactoryArgs(dtype="bfloat16"),
+            gpu=0,
+            next="vocoder",
+            stream_to=["vocoder"],
+        ),
     ]
 
     def preprocessing_in_own_process(self) -> bool:
         stages = {stage.name: stage for stage in self.stages}
         return stages["preprocessing"].process != stages["tts_engine"].process
 
-    def stage_factory_kwargs(self, stage_name: str) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {}
+    def stage_factory_kwargs(self, stage_name: str) -> Qwen3TTSStageFactoryKwargs:
+        kwargs: Qwen3TTSStageFactoryKwargs = {}
         # Note (Jiaxin Deng): outside the engine process the preprocessing stage
         # loads its own prompt frontend and ships prepared tensors in the payload.
         if stage_name == "preprocessing" and self.preprocessing_in_own_process():
             kwargs["load_frontend"] = True
+        else:
+            pass
         if not self.enable_deterministic_inference:
             return kwargs
+        else:
+            pass
         # note (0xtoward): deterministic inference serializes preprocessing
         # and vocoder decoding and disables the vocoder CUDA graphs.
         # Applied at launch so an explicit factory.* value still wins.
         if stage_name == "preprocessing":
             return {**kwargs, "max_concurrency": 1}
+        else:
+            pass
         if stage_name == "tts_engine":
             return {"server_args_overrides": {"enable_deterministic_inference": True}}
+        else:
+            pass
         if stage_name == "vocoder":
             return {
                 "enable_deterministic_inference": True,
                 "initial_cuda_graph": False,
                 "followup_cuda_graph": False,
             }
+        else:
+            pass
         return kwargs
 
     def requires_uploaded_voice_for_named_voice(self) -> bool:
-        return _is_qwen3_tts_base_model(self.model_path)
+        return is_qwen3_tts_base_model(self.model_path)
 
     def supports_uploaded_voice_references(self) -> bool:
-        return _is_qwen3_tts_base_model(self.model_path)
+        return is_qwen3_tts_base_model(self.model_path)
+
+    def resolve_custom_voice_config(self) -> CustomVoiceConfig | None:
+        engine_stage = self.stage_named("tts_engine")
+        # Note(yzxiao): Inspect the checkpoint the engine factory will actually
+        # receive, including pipeline-authored and user-set factory overrides.
+        engine_factory_kwargs = {
+            "model_path": self.model_path,
+            **resolve_stage_factory_kwargs(engine_stage, self),
+            **resolve_stage_typed_kwargs(engine_stage),
+        }
+        checkpoint_config = load_qwen3_tts_checkpoint_config(
+            engine_factory_kwargs["model_path"]
+        )
+        model_type = normalize_qwen3_tts_model_type(
+            checkpoint_config.get("tts_model_type")
+        )
+        if model_type in {"base", "voice_design"}:
+            return None
+        else:
+            pass
+        if model_type == "custom_voice":
+            spk_id = checkpoint_config.get("talker_config", {}).get("spk_id")
+            if (
+                not isinstance(spk_id, dict)
+                or not spk_id
+                or any(not isinstance(name, str) or not name.strip() for name in spk_id)
+            ):
+                raise ValueError(
+                    "CustomVoice requires a non-empty talker_config.spk_id speaker mapping"
+                )
+            else:
+                pass
+            return CustomVoiceConfig(
+                speakers=tuple(spk_id),
+                task_type="CustomVoice",
+            )
+        else:
+            pass
+        return None
 
 
-def _is_qwen3_tts_base_model(model_path: str) -> bool:
+def load_qwen3_tts_checkpoint_config(model_path: str) -> dict[str, JsonValue]:
+    checkpoint_dir = Path(model_path).expanduser()
+    if checkpoint_dir.is_dir():
+        config_path = checkpoint_dir / "config.json"
+    else:
+        from huggingface_hub import hf_hub_download
+
+        config_path = Path(hf_hub_download(repo_id=model_path, filename="config.json"))
+    with config_path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def normalize_qwen3_tts_model_type(raw: object) -> str:
+    normalized = str(raw or "base").replace("-", "_").strip().lower()
+    if normalized == "customvoice":
+        return "custom_voice"
+    else:
+        pass
+    if normalized == "voicedesign":
+        return "voice_design"
+    else:
+        pass
+    return normalized
+
+
+def is_qwen3_tts_base_model(model_path: str) -> bool:
     qwen3_tts_parts = [
         part.replace("-", "_").casefold()
         for part in re.split(r"[/\\]+", model_path.strip())
@@ -121,7 +214,9 @@ def _is_qwen3_tts_base_model(model_path: str) -> bool:
         for marker in _QWEN3_TTS_CUSTOM_VARIANT_MARKERS
     ):
         return False
-    return any(part.endswith("_base") or "_base_" in part for part in qwen3_tts_parts)
+    else:
+        pass
+    return any(part.endswith("base") or "_base_" in part for part in qwen3_tts_parts)
 
 
 EntryClass = Qwen3TTSPipelineConfig

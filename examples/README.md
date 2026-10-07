@@ -2,6 +2,11 @@
 
 Run these commands from the repository root after installing `sglang-omni`.
 
+## Full-duplex audio
+
+See [full_duplex/README.md](full_duplex/README.md) for MiniCPM-o
+native session configuration and launch commands.
+
 ## Unified Launcher
 
 `run_omni.py` keeps model and topology choices in reusable presets. Use
@@ -54,6 +59,16 @@ Qwen3-Omni FP8, one-GPU colocated H100/H20:
 ```bash
 sgl-omni serve \
   --config examples/configs/qwen3_omni_fp8_colocated.yaml \
+  --colocate \
+  --model-name qwen3-omni \
+  --port 8000
+```
+
+Qwen3-Omni BF16, one-GPU colocated AMD MI355X (gfx950, ROCm):
+
+```bash
+sgl-omni serve \
+  --config examples/configs/qwen3_omni_colocated_gfx950_bf16.yaml \
   --colocate \
   --model-name qwen3-omni \
   --port 8000
