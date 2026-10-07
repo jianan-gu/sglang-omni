@@ -6,10 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import torch
-from sglang.srt.arg_groups.model_override_base import (
-    attention_backends_of,
-    resolved_view,
-)
+from sglang.srt.arg_groups.model_override_base import resolved_view
 from sglang.srt.platforms.device_mixin import PlatformEnum
 
 from sglang_omni.platforms.interface import JointRopeInplaceKernel, OmniPlatform
@@ -115,15 +112,6 @@ class XPUOmniPlatform(OmniPlatform):
 
         cfg = resolved_view(server_args)
         moe_runner_backend = cfg.moe_runner_backend
-        if model_arch_override == "WhisperForConditionalGeneration" and any(
-            backend != self.cross_attention_backend()
-            for backend in attention_backends_of(cfg)
-        ):
-            raise ValueError(
-                "Whisper ASR on Intel XPU requires torch_native for both "
-                "prefill and decode attention; remove the backend override "
-                "or set both phases to torch_native."
-            )
         if model_arch_override in (
             "Qwen3OmniTalker",
             "Qwen3OmniThinkerForCausalLM",
