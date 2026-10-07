@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from transformers import GenerationConfig, WhisperProcessor, WhisperTokenizer
 
+from sglang_omni import platforms
 from sglang_omni.models.whisper_asr.encoder_service import (
     WhisperPreLMEncoderService,
     build_cache_namespace,
@@ -383,8 +384,6 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
         overrides["cuda_graph_bs_prefill"] = build_default_prefill_cuda_graph_bs(cap)
 
     def generation_defaults(self, *, dtype: str) -> GenerationDefaults:
-        from sglang_omni.platforms import current_platform
-
         defaults: GenerationDefaults = {
             "max_running_requests": self.max_running_requests,
             "disable_cuda_graph": False,
@@ -399,9 +398,9 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
         }
         # The platform owns whether Whisper's encoder-decoder cross attention
         # needs a specific backend (SGLang's default forces CUDA-only flashinfer).
-        cross_attn_backend = current_platform.cross_attention_backend()
-        if cross_attn_backend is not None:
-            defaults["attention_backend"] = cross_attn_backend
+        cross_attention_backend = platforms.current_platform.cross_attention_backend()
+        if cross_attention_backend is not None:
+            defaults["attention_backend"] = cross_attention_backend
         else:
             pass
         return defaults

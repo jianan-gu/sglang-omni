@@ -115,12 +115,9 @@ class XPUOmniPlatform(OmniPlatform):
 
         cfg = resolved_view(server_args)
         moe_runner_backend = cfg.moe_runner_backend
-        if (
-            model_arch_override == "WhisperForConditionalGeneration"
-            and any(
-                backend != self.cross_attention_backend()
-                for backend in attention_backends_of(cfg)
-            )
+        if model_arch_override == "WhisperForConditionalGeneration" and any(
+            backend != self.cross_attention_backend()
+            for backend in attention_backends_of(cfg)
         ):
             raise ValueError(
                 "Whisper ASR on Intel XPU requires torch_native for both "
