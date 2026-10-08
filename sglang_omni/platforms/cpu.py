@@ -9,6 +9,8 @@ from sglang_omni.platforms.interface import OmniPlatform
 if TYPE_CHECKING:
     from sglang.srt.configs.model_config import ModelConfig
     from sglang.srt.server_args import ServerArgs
+else:
+    pass
 
 
 class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
@@ -35,4 +37,6 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
                 "Whisper ASR on CPU requires attention_backend='torch_native'. "
                 "Drop the override or set it to 'torch_native'."
             )
+        else:
+            pass
         return effective_quantization

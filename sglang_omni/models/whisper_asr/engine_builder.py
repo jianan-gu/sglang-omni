@@ -18,6 +18,7 @@ from sglang_omni.models.whisper_asr.request_builders import (
     MAX_PREV_CONTEXT_TOKENS,
     WhisperASRRequestData,
 )
+from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.proto.request import StagePayload
 from sglang_omni.scheduling.engine_factory import (
     AsrEngineBuilder,
@@ -252,6 +253,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
         self.context_length = 0
         self.decoder_context_len = 0
         self.audio_encoder_service: WhisperPreLMEncoderService | None = None
+        self.device: str | None = None
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
         from transformers import AutoConfig, AutoProcessor, GenerationConfig
@@ -396,9 +398,14 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             "dtype": dtype,
             "cuda_graph_backend_prefill": CudaGraphBackend.BREAKABLE,
         }
-        cross_attn_backend = platforms.current_platform.cross_attention_backend()
-        if cross_attn_backend is not None:
-            defaults["attention_backend"] = cross_attn_backend
+        stage_platform = (
+            CPUOmniPlatform() if self.device == "cpu" else platforms.current_platform
+        )
+        cross_attention_backend = stage_platform.cross_attention_backend()
+        if cross_attention_backend is not None:
+            defaults["attention_backend"] = cross_attention_backend
+        else:
+            pass
         return defaults
 
     def make_adapters(self, model: object) -> tuple[
