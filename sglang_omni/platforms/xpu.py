@@ -32,7 +32,10 @@ class XPUOmniPlatform(XpuDeviceMixin, OmniPlatform):
     def enable_code2wav_graph(self):
         return True
 
-    def cross_attention_backend(self) -> str | None:
+    def get_encoder_decoder_attention_backend(self) -> str | None:
+        # note (jianan): intel_xpu requires graphs disabled for encoder-decoder
+        # models; torch_native makes SGLang disable both graph phases.
+        # TODO: Prefer intel_xpu once it supports encoder-decoder graphs.
         return "torch_native"
 
     def get_fused_qk_norm_rope_with_cos_sin_cache(self):
