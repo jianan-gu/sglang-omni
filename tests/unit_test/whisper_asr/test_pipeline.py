@@ -219,7 +219,10 @@ def test_whisper_explicit_attention_backend_overrides_platform_default(
         mem_fraction_static=0.2,
     ).generation_defaults(dtype="float16")
     overrides = build_generation_batch_overrides(
-        server_args_overrides={"attention_backend": "intel_xpu"},
+        server_args_overrides={
+            "attention_backend": "intel_xpu",
+            "disable_cuda_graph": True,
+        },
         **defaults,
     )
 
