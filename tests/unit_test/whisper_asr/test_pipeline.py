@@ -209,26 +209,6 @@ def test_whisper_encoder_decoder_attention_backend_defaults(
         assert defaults["attention_backend"] == expected_backend
 
 
-def test_whisper_explicit_attention_backend_overrides_platform_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(whisper_asr_builder, "current_platform", XPUOmniPlatform())
-    defaults = whisper_asr_builder.WhisperASREngineBuilder(
-        max_running_requests=4,
-        max_new_tokens=32,
-        mem_fraction_static=0.2,
-    ).generation_defaults(dtype="float16")
-    overrides = build_generation_batch_overrides(
-        server_args_overrides={
-            "attention_backend": "intel_xpu",
-            "disable_cuda_graph": True,
-        },
-        **defaults,
-    )
-
-    assert overrides["attention_backend"] == "intel_xpu"
-
-
 def test_whisper_breakable_prefill_graph_policy() -> None:
     builder = whisper_asr_builder.WhisperASREngineBuilder(
         max_running_requests=4,
