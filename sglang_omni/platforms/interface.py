@@ -122,12 +122,8 @@ class OmniPlatform(DeviceMixin):
         """Check if current platform support Graph for code2wav in Qwen3-Omni"""
         return True
 
-    def cross_attention_backend(self) -> str | None:
-        """Attention backend for encoder-decoder cross attention, if required."""
-        return None
-
     def enable_codec_decode_graph(self) -> bool:
-        """Check if current platform captures decode graphs for the Higgs TTS codec"""
+        """Check if current platform captures codec decode graphs (Higgs TTS, Mimi)"""
         return False
 
     def enable_talker_graph(self) -> bool:
@@ -152,6 +148,10 @@ class OmniPlatform(DeviceMixin):
         return None
 
     def get_decode_cuda_graph_backend(self) -> str | None:
+        return None
+
+    def get_encoder_decoder_attention_backend(self) -> str | None:
+        """Default backend for all attention in encoder-decoder models, if needed."""
         return None
 
     def supports_fp8_moe(self) -> bool:

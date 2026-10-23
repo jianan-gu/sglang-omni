@@ -17,7 +17,7 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
     def enable_code2wav_graph(self):
         return False
 
-    def cross_attention_backend(self) -> str | None:
+    def get_encoder_decoder_attention_backend(self) -> str | None:
         return "torch_native"
 
     def apply_model_worker_backend_policy(
@@ -31,7 +31,8 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
         )
         if (
             model_arch_override == "WhisperForConditionalGeneration"
-            and server_args.attention_backend != self.cross_attention_backend()
+            and server_args.attention_backend
+            != self.get_encoder_decoder_attention_backend()
         ):
             raise ValueError(
                 "Whisper ASR on CPU requires attention_backend='torch_native'. "

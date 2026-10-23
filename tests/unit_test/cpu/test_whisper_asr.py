@@ -16,6 +16,7 @@ from sglang_omni.scheduling import sglang_backend
 
 def whisper_builder() -> WhisperASREngineBuilder:
     return WhisperASREngineBuilder(
+        encoder_attention_backend="auto",
         max_running_requests=4,
         max_new_tokens=32,
         mem_fraction_static=0.2,
