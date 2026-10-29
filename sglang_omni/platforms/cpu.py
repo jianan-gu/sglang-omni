@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from sglang.srt.arg_groups.model_override_base import (
+    attention_backends_of,
+    resolved_view,
+)
 from sglang.srt.platforms.cpu import CpuDeviceMixin
 
 from sglang_omni.platforms.interface import OmniPlatform
@@ -29,14 +33,13 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
         effective_quantization = super().apply_model_worker_backend_policy(
             server_args, model_config, model_arch_override
         )
-        if (
-            model_arch_override == "WhisperForConditionalGeneration"
-            and server_args.attention_backend
-            != self.get_encoder_decoder_attention_backend()
+        if model_arch_override == "WhisperForConditionalGeneration" and any(
+            backend != "torch_native"
+            for backend in attention_backends_of(resolved_view(server_args))
         ):
             raise ValueError(
-                "Whisper ASR on CPU requires attention_backend='torch_native'. "
-                "Drop the override or set it to 'torch_native'."
+                "Whisper ASR on CPU requires torch_native for both prefill and "
+                "decode attention. Remove unsupported attention backend overrides."
             )
         else:
             pass

@@ -23,10 +23,16 @@ def whisper_builder() -> WhisperASREngineBuilder:
     )
 
 
-def server_args(attention_backend: str) -> SimpleNamespace:
+def server_args(
+    attention_backend: str,
+    prefill_attention_backend: str | None = None,
+    decode_attention_backend: str | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
         quantization=None,
         attention_backend=attention_backend,
+        prefill_attention_backend=prefill_attention_backend,
+        decode_attention_backend=decode_attention_backend,
     )
 
 
@@ -36,6 +42,16 @@ def test_whisper_cpu_selects_torch_native_attention(monkeypatch) -> None:
     defaults = whisper_builder().generation_defaults(dtype="float16")
 
     assert defaults["attention_backend"] == "torch_native"
+    assert defaults["enable_torch_compile"] is False
+
+
+def test_whisper_accelerator_keeps_compile_and_async_decode(monkeypatch) -> None:
+    monkeypatch.setattr(platforms, "current_platform", CUDAOmniPlatform())
+    builder = whisper_builder()
+    builder.device = "cuda:0"
+
+    assert builder.generation_defaults(dtype="float16")["enable_torch_compile"] is True
+    assert builder.extra_scheduler_kwargs()["enable_async_decode"] is True
 
 
 def test_explicit_cpu_stage_on_accelerator_host_uses_cpu_defaults(monkeypatch) -> None:
@@ -60,12 +76,28 @@ def test_explicit_cpu_stage_on_accelerator_host_uses_cpu_defaults(monkeypatch) -
     assert captured["device"] == "cpu"
     assert captured["attention_backend"] == "torch_native"
     assert captured["disable_cuda_graph"] is True
+    assert captured["enable_torch_compile"] is False
 
 
-def test_whisper_cpu_rejects_unsupported_attention_backend() -> None:
-    with pytest.raises(ValueError, match="requires attention_backend='torch_native'"):
+def test_whisper_cpu_disables_async_decode_even_when_requested() -> None:
+    builder = whisper_builder()
+    builder.device = "cpu:0"
+
+    assert builder.extra_scheduler_kwargs()["enable_async_decode"] is False
+
+
+@pytest.mark.parametrize(
+    "attention_args",
+    [
+        server_args("triton"),
+        server_args("torch_native", prefill_attention_backend="triton"),
+        server_args("torch_native", decode_attention_backend="triton"),
+    ],
+)
+def test_whisper_cpu_rejects_unsupported_attention_backend(attention_args) -> None:
+    with pytest.raises(ValueError, match="requires torch_native"):
         CPUOmniPlatform().apply_model_worker_backend_policy(
-            server_args("triton"),
+            attention_args,
             SimpleNamespace(quantization=None),
             "WhisperForConditionalGeneration",
         )
