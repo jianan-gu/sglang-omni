@@ -81,7 +81,7 @@ def test_explicit_cpu_stage_on_accelerator_host_uses_cpu_defaults(monkeypatch) -
 
 def test_whisper_cpu_disables_async_decode_even_when_requested() -> None:
     builder = whisper_builder()
-    builder.device = "cpu:0"
+    builder.device = "cpu"
 
     assert builder.extra_scheduler_kwargs()["enable_async_decode"] is False
 

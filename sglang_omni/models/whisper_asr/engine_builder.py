@@ -31,6 +31,7 @@ from sglang_omni.models.whisper_asr.text_streaming import (
     ExactWhisperStreamOutputBuilder,
 )
 from sglang_omni.platforms.cpu import CPUOmniPlatform
+from sglang_omni.platforms.interface import OmniPlatform
 from sglang_omni.proto.request import StagePayload
 from sglang_omni.scheduling.engine_factory import (
     AsrEngineBuilder,
@@ -480,12 +481,13 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             pass
         overrides["cuda_graph_bs_prefill"] = build_default_prefill_cuda_graph_bs(cap)
 
+    def stage_platform(self) -> OmniPlatform:
+        if self.device == "cpu" and not platforms.current_platform.is_cpu():
+            return CPUOmniPlatform()
+        return platforms.current_platform
+
     def generation_defaults(self, *, dtype: str) -> GenerationDefaults:
-        stage_platform = (
-            CPUOmniPlatform()
-            if self.device is not None and torch.device(self.device).type == "cpu"
-            else platforms.current_platform
-        )
+        stage_platform = self.stage_platform()
         defaults: GenerationDefaults = {
             "max_running_requests": self.max_running_requests,
             "disable_cuda_graph": False,
@@ -530,7 +532,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
                 self.tokenizer, self.stream_emit_interval_s
             ),
             "enable_async_decode": self.enable_async_decode
-            and (self.device is None or torch.device(self.device).type != "cpu"),
+            and not self.stage_platform().is_cpu(),
             "async_decode_min_batch_size": self.async_decode_min_batch_size,
             "request_build_max_workers": self.request_build_max_workers,
             "request_build_max_pending": self.request_build_max_pending,
