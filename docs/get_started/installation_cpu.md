@@ -102,3 +102,23 @@ libraries at import. An unsupported FFmpeg version can surface as the unhelpful
 `torchcodec` ships loaders for FFmpeg majors 4–8 only; FFmpeg 9 satisfies none
 of them. Pin an older major if needed. Docker users get a supported major from
 `apt`.
+
+## Serve
+
+### Whisper ASR (speech-to-text, Intel Xeon CPU)
+
+Whisper-base and Whisper-large-v3 have been validated on an AMX-capable Intel Xeon CPU. CPU serving defaults to the `intel_amx` attention backend for both prefill and decode; graph capture, torch.compile, and async decode are disabled.
+
+Run inside the CPU environment installed above:
+
+```bash
+SGLANG_USE_CPU_ENGINE=1 sgl-omni serve \
+  --model-path openai/whisper-base \
+  --port 8000
+```
+
+To use Whisper-large-v3, replace `openai/whisper-base` with `openai/whisper-large-v3` in the server command.
+
+To select PyTorch native attention instead of AMX, append `--asr.engine.attention_backend torch_native` to the server command. This fallback is explicit, not automatically selected on CPUs without AMX.
+
+See the [Whisper cookbook](../cookbook/whisper_asr.md) for request parameters, supported response formats, and the SeedTTS WER benchmark.
