@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sglang_omni import platforms
+from sglang_omni.models.whisper_asr import engine_builder
 from sglang_omni.models.whisper_asr.engine_builder import WhisperASREngineBuilder
 from sglang_omni.platforms.cpu import CPUOmniPlatform
 from sglang_omni.platforms.cuda import CUDAOmniPlatform
@@ -36,7 +36,7 @@ def server_args(
 
 
 def test_whisper_cpu_selects_torch_native_attention(monkeypatch) -> None:
-    monkeypatch.setattr(platforms, "current_platform", CPUOmniPlatform())
+    monkeypatch.setattr(engine_builder, "current_platform", CPUOmniPlatform())
 
     defaults = whisper_builder().generation_defaults(dtype="float16")
 
@@ -45,7 +45,7 @@ def test_whisper_cpu_selects_torch_native_attention(monkeypatch) -> None:
 
 
 def test_whisper_accelerator_keeps_compile_and_async_decode(monkeypatch) -> None:
-    monkeypatch.setattr(platforms, "current_platform", CUDAOmniPlatform())
+    monkeypatch.setattr(engine_builder, "current_platform", CUDAOmniPlatform())
     builder = whisper_builder()
 
     assert builder.generation_defaults(dtype="float16")["enable_torch_compile"] is True
@@ -53,7 +53,7 @@ def test_whisper_accelerator_keeps_compile_and_async_decode(monkeypatch) -> None
 
 
 def test_whisper_cpu_disables_async_decode_even_when_requested(monkeypatch) -> None:
-    monkeypatch.setattr(platforms, "current_platform", CPUOmniPlatform())
+    monkeypatch.setattr(engine_builder, "current_platform", CPUOmniPlatform())
     builder = whisper_builder()
 
     assert builder.extra_scheduler_kwargs()["enable_async_decode"] is False

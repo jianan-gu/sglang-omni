@@ -12,7 +12,6 @@ import torch
 from sglang.srt.server_args import ServerArgs
 from transformers import GenerationConfig, WhisperProcessor, WhisperTokenizer
 
-import sglang_omni.platforms as platforms
 from sglang_omni.model_runner.model_worker import ModelWorker
 from sglang_omni.model_runner.sglang_model_runner import SGLModelRunner
 from sglang_omni.model_runner.whisper_prefill_cuda_graph_runner import (
@@ -30,6 +29,7 @@ from sglang_omni.models.whisper_asr.request_builders import (
 from sglang_omni.models.whisper_asr.text_streaming import (
     ExactWhisperStreamOutputBuilder,
 )
+from sglang_omni.platforms import current_platform
 from sglang_omni.proto.request import StagePayload
 from sglang_omni.scheduling.engine_factory import (
     AsrEngineBuilder,
@@ -483,7 +483,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             "max_running_requests": self.max_running_requests,
             "disable_cuda_graph": False,
             "disable_overlap_schedule": True,
-            "enable_torch_compile": not platforms.current_platform.is_cpu(),
+            "enable_torch_compile": not current_platform.is_cpu(),
             "mem_fraction_static": self.mem_fraction_static,
             "max_prefill_tokens": 6144,
             "chunked_prefill_size": 0,
@@ -491,9 +491,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             "dtype": dtype,
             "cuda_graph_backend_prefill": CudaGraphBackend.BREAKABLE,
         }
-        attention_backend = (
-            platforms.current_platform.get_encoder_decoder_attention_backend()
-        )
+        attention_backend = current_platform.get_encoder_decoder_attention_backend()
         if attention_backend is not None:
             defaults["attention_backend"] = attention_backend
         else:
@@ -525,7 +523,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
                 self.tokenizer, self.stream_emit_interval_s
             ),
             "enable_async_decode": self.enable_async_decode
-            and not platforms.current_platform.is_cpu(),
+            and not current_platform.is_cpu(),
             "async_decode_min_batch_size": self.async_decode_min_batch_size,
             "request_build_max_workers": self.request_build_max_workers,
             "request_build_max_pending": self.request_build_max_pending,
