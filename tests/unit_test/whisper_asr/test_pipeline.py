@@ -26,6 +26,7 @@ from sglang_omni.models.whisper_asr.config import (
     WhisperASRFactoryArgs,
     WhisperASRPipelineConfig,
 )
+from sglang_omni.models.whisper_asr.engine_builder import WhisperASREngineBuilder
 from sglang_omni.models.whisper_asr.sglang_model import WhisperForConditionalGeneration
 from sglang_omni.models.whisper_asr.text_streaming import (
     ExactWhisperStreamOutputBuilder,
@@ -251,9 +252,9 @@ def test_whisper_prefill_graph_cap_covers_shorter_request_batches() -> None:
     assert merged["cuda_graph_bs_prefill"] == build_default_prefill_cuda_graph_bs(620)
 
 
-def test_whisper_prefill_coalescing_defaults_are_forwarded(monkeypatch) -> None:
-    from sglang_omni.models.whisper_asr.engine_builder import WhisperASREngineBuilder
-
+def test_whisper_prefill_coalescing_defaults_are_forwarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(whisper_asr_builder, "current_platform", CUDAOmniPlatform())
     builder = WhisperASREngineBuilder(
         encoder_attention_backend="auto",

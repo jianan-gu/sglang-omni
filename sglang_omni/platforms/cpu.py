@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from sglang.srt.arg_groups.model_override_base import (
     attention_backends_of,
     resolved_view,
 )
+from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.platforms.cpu import CpuDeviceMixin
+from sglang.srt.server_args import ServerArgs
 
 from sglang_omni.platforms.interface import OmniPlatform
 
-if TYPE_CHECKING:
-    from sglang.srt.configs.model_config import ModelConfig
-    from sglang.srt.server_args import ServerArgs
-else:
-    pass
-
 
 class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
-    def enable_code2wav_graph(self):
+    def enable_code2wav_graph(self) -> bool:
         return False
 
     def get_encoder_decoder_attention_backend(self) -> str | None:
