@@ -113,11 +113,9 @@ Run inside the CPU environment installed above:
 
 ```bash
 SGLANG_USE_CPU_ENGINE=1 sgl-omni serve \
-  --model-path openai/whisper-base \
+  --model-path openai/whisper-large-v3 \
   --port 8000
 ```
-
-To use Whisper-large-v3, replace `openai/whisper-base` with `openai/whisper-large-v3` in the server command.
 
 To select PyTorch native attention instead of AMX, append `--asr.engine.attention_backend torch_native` to the server command. This fallback is explicit, not automatically selected on CPUs without AMX.
 
