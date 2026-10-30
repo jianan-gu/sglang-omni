@@ -30,8 +30,6 @@ from sglang_omni.models.whisper_asr.request_builders import (
 from sglang_omni.models.whisper_asr.text_streaming import (
     ExactWhisperStreamOutputBuilder,
 )
-from sglang_omni.platforms.cpu import CPUOmniPlatform
-from sglang_omni.platforms.interface import OmniPlatform
 from sglang_omni.proto.request import StagePayload
 from sglang_omni.scheduling.engine_factory import (
     AsrEngineBuilder,
@@ -287,7 +285,6 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
         self.context_length = 0
         self.decoder_context_len = 0
         self.audio_encoder_service: WhisperPreLMEncoderService | None = None
-        self.device: str | None = None
         self.sglang_runner: SGLModelRunner | None = None
 
     def pre_infra_setup(self, checkpoint_dir: str) -> None:
@@ -481,18 +478,12 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             pass
         overrides["cuda_graph_bs_prefill"] = build_default_prefill_cuda_graph_bs(cap)
 
-    def stage_platform(self) -> OmniPlatform:
-        if self.device == "cpu" and not platforms.current_platform.is_cpu():
-            return CPUOmniPlatform()
-        return platforms.current_platform
-
     def generation_defaults(self, *, dtype: str) -> GenerationDefaults:
-        stage_platform = self.stage_platform()
         defaults: GenerationDefaults = {
             "max_running_requests": self.max_running_requests,
             "disable_cuda_graph": False,
             "disable_overlap_schedule": True,
-            "enable_torch_compile": not stage_platform.is_cpu(),
+            "enable_torch_compile": not platforms.current_platform.is_cpu(),
             "mem_fraction_static": self.mem_fraction_static,
             "max_prefill_tokens": 6144,
             "chunked_prefill_size": 0,
@@ -500,7 +491,9 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
             "dtype": dtype,
             "cuda_graph_backend_prefill": CudaGraphBackend.BREAKABLE,
         }
-        attention_backend = stage_platform.get_encoder_decoder_attention_backend()
+        attention_backend = (
+            platforms.current_platform.get_encoder_decoder_attention_backend()
+        )
         if attention_backend is not None:
             defaults["attention_backend"] = attention_backend
         else:
@@ -532,7 +525,7 @@ class WhisperASREngineBuilder(AsrEngineBuilder[WhisperASRRequestData]):
                 self.tokenizer, self.stream_emit_interval_s
             ),
             "enable_async_decode": self.enable_async_decode
-            and not self.stage_platform().is_cpu(),
+            and not platforms.current_platform.is_cpu(),
             "async_decode_min_batch_size": self.async_decode_min_batch_size,
             "request_build_max_workers": self.request_build_max_workers,
             "request_build_max_pending": self.request_build_max_pending,
