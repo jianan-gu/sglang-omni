@@ -16,7 +16,7 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
         return False
 
     def get_encoder_decoder_attention_backend(self) -> str | None:
-        return "torch_native"
+        return "intel_amx"
 
     def apply_model_worker_backend_policy(
         self,
@@ -28,12 +28,13 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
             server_args, model_config, model_arch_override
         )
         if model_arch_override == "WhisperForConditionalGeneration" and any(
-            backend != "torch_native"
+            backend not in ("intel_amx", "torch_native")
             for backend in attention_backends_of(resolved_view(server_args))
         ):
             raise ValueError(
-                "Whisper ASR on CPU requires torch_native for both prefill and "
-                "decode attention. Remove unsupported attention backend overrides."
+                "Whisper ASR on CPU supports intel_amx or torch_native for both "
+                "prefill and decode attention. Remove unsupported attention "
+                "backend overrides."
             )
         else:
             pass

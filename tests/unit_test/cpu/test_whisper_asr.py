@@ -52,7 +52,7 @@ def test_whisper_cpu_disables_compile_and_async_decode(
     builder = whisper_builder()
 
     defaults = builder.generation_defaults(dtype="float16")
-    assert defaults["attention_backend"] == "torch_native"
+    assert defaults["attention_backend"] == "intel_amx"
     assert defaults["enable_torch_compile"] is False
     assert builder.extra_scheduler_kwargs()["enable_async_decode"] is False
 
@@ -61,14 +61,14 @@ def test_whisper_cpu_disables_compile_and_async_decode(
     "attention_arguments",
     [
         build_attention_arguments("triton"),
-        build_attention_arguments("torch_native", prefill_attention_backend="triton"),
-        build_attention_arguments("torch_native", decode_attention_backend="triton"),
+        build_attention_arguments("intel_amx", prefill_attention_backend="triton"),
+        build_attention_arguments("intel_amx", decode_attention_backend="triton"),
     ],
 )
 def test_whisper_cpu_rejects_unsupported_attention_backend(
     attention_arguments: SimpleNamespace,
 ) -> None:
-    with pytest.raises(ValueError, match="requires torch_native"):
+    with pytest.raises(ValueError, match="supports intel_amx or torch_native"):
         CPUOmniPlatform().apply_model_worker_backend_policy(
             attention_arguments,
             SimpleNamespace(quantization=None),
@@ -76,9 +76,23 @@ def test_whisper_cpu_rejects_unsupported_attention_backend(
         )
 
 
-def test_whisper_cpu_accepts_torch_native_attention_backend() -> None:
-    effective_quantization = CPUOmniPlatform().apply_model_worker_backend_policy(
+@pytest.mark.parametrize(
+    "attention_arguments",
+    [
+        build_attention_arguments("intel_amx"),
         build_attention_arguments("torch_native"),
+        build_attention_arguments(
+            "triton",
+            prefill_attention_backend="intel_amx",
+            decode_attention_backend="torch_native",
+        ),
+    ],
+)
+def test_whisper_cpu_accepts_supported_attention_backends(
+    attention_arguments: SimpleNamespace,
+) -> None:
+    effective_quantization = CPUOmniPlatform().apply_model_worker_backend_policy(
+        attention_arguments,
         SimpleNamespace(quantization=None),
         "WhisperForConditionalGeneration",
     )
