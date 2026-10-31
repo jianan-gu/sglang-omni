@@ -52,7 +52,7 @@ def test_whisper_cpu_disables_compile_and_async_decode(
     builder = whisper_builder()
 
     defaults = builder.generation_defaults(dtype="float16")
-    assert defaults["attention_backend"] == "intel_amx"
+    assert "attention_backend" not in defaults
     assert defaults["enable_torch_compile"] is False
     assert builder.extra_scheduler_kwargs()["enable_async_decode"] is False
 

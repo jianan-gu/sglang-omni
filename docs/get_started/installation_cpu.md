@@ -107,7 +107,7 @@ of them. Pin an older major if needed. Docker users get a supported major from
 
 ### Whisper ASR (speech-to-text, Intel Xeon CPU)
 
-Whisper-base and Whisper-large-v3 have been validated on an AMX-capable Intel Xeon CPU. CPU serving defaults to the `intel_amx` attention backend for both prefill and decode; graph capture, torch.compile, and async decode are disabled.
+Whisper-base and Whisper-large-v3 have been validated on an AMX-capable Intel Xeon CPU. SGLang selects `intel_amx` by default on x86 CPUs and automatically falls back to `torch_native` when AMX is unavailable; graph capture, torch.compile, and async decode are disabled by default on CPU.
 
 Run inside the CPU environment installed above:
 
@@ -117,6 +117,6 @@ SGLANG_USE_CPU_ENGINE=1 sgl-omni serve \
   --port 8000
 ```
 
-To select PyTorch native attention instead of AMX, append `--asr.engine.attention_backend torch_native` to the server command. This fallback is explicit, not automatically selected on CPUs without AMX.
+To explicitly select PyTorch native attention, including on AMX-capable Xeon CPUs, append `--asr.engine.attention_backend torch_native` to the server command.
 
 See the [Whisper cookbook](../cookbook/whisper_asr.md) for request parameters, supported response formats, and the SeedTTS WER benchmark.

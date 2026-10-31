@@ -15,9 +15,6 @@ class CPUOmniPlatform(CpuDeviceMixin, OmniPlatform):
     def enable_code2wav_graph(self) -> bool:
         return False
 
-    def get_encoder_decoder_attention_backend(self) -> str | None:
-        return "intel_amx"
-
     def apply_model_worker_backend_policy(
         self,
         server_args: ServerArgs,
